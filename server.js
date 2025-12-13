@@ -27,6 +27,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 const defaultOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  'https://railtrans-expo-yld6-git-master-railtransexpos-projects.vercel.app'
 ];
 
 const envOrigins = (process.env.ALLOWED_ORIGINS || process.env.REACT_APP_API_BASE_URL || '')
