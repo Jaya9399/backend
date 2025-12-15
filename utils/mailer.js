@@ -14,13 +14,16 @@ const {
 
 /* --- helper: obtain DB (supports mongo.getDb() async or mongo.db sync) --- */
 async function obtainDb() {
-  if (!mongo) return null;
-  if (typeof mongo.getDb === "function") {
-    return await mongo.getDb();
+  try {
+    if (!mongo) return null;
+    if (typeof mongo.getDb === "function") return await mongo.getDb();
+    if (mongo.db) return mongo.db;
+  } catch (err) {
+    console.warn("[mailer] obtainDb failed:", err.message);
   }
-  if (mongo.db) return mongo.db;
   return null;
 }
+
 
 /**
  * Normalize MAIL_FROM and MAIL_FROM_NAME
@@ -42,11 +45,15 @@ function parseMailFrom(envFrom, envName) {
     }
   }
 
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    if (SMTP_USER && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(SMTP_USER)) {
-      email = SMTP_USER;
-    }
+ if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+  console.warn(`[mailer] Invalid MAIL_FROM email "${email}"`);
+  if (SMTP_USER && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(SMTP_USER)) {
+    email = SMTP_USER;
+  } else {
+    throw new Error("No valid sender email configured");
   }
+}
+
 
   return { email, name };
 }
@@ -62,7 +69,8 @@ function buildTransporter() {
       secure,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
       pool: true,
-      tls: { rejectUnauthorized: false },
+     tls: { rejectUnauthorized: process.env.NODE_ENV !== "production" ? false : true },
+
     });
   }
   if (SMTP_SERVICE) {
