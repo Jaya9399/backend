@@ -288,6 +288,8 @@ const PORT = process.env.PORT ;
       }
     }
 
+    
+
     app.listen(PORT,"0.0.0.0", () => {
       console.log(`Server running at port ${PORT}`);
       console.log('Allowed CORS origins:', allowedOrigins.length ? allowedOrigins : 'all (dev)');
