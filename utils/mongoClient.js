@@ -1,35 +1,16 @@
-// utils/mongoClient.js
-// Lightweight Mongo helper with singleton connection + counter helpers.
-//
-// Exports:
-// - connect(uri, dbName)
-// - getDb()
-// - getCollection(name)
-// - getNextSequence(sequenceName)
-// - resetSequence(sequenceName, value)
-// - isConnected()
-// - close()
 const { MongoClient } = require("mongodb");
 
 let _client = null;
 let _db = null;
 
-/**
- * connect(uri, dbName, opts?)
- * - idempotent: returns existing connection if already connected
- */
 async function connect(uri, dbName, opts = {}) {
   if (_client && _db) return { client: _client, db: _db };
 
-  if (!uri) throw new Error("Mongo URI is required to connect");
-  if (!dbName) throw new Error("Mongo DB name is required to connect");
+  if (!uri) throw new Error("Mongo URI is required");
+  if (!dbName) throw new Error("Mongo DB name is required");
 
-  // sensible defaults; you can override via opts
   const defaultOpts = {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    tls: true,
-    tlsAllowInvalidCertificates: false, // set true only if testing
+    // Modern driver automatically uses new parser and topology
     serverSelectionTimeoutMS: 10000,
     connectTimeoutMS: 10000,
     retryWrites: true,
@@ -42,11 +23,11 @@ async function connect(uri, dbName, opts = {}) {
   try {
     await _client.connect();
     _db = _client.db(dbName);
-    console.log(`Connected to MongoDB: ${uri}, DB: ${dbName}`);
+    console.log(`✅ Connected to MongoDB: ${uri}, DB: ${dbName}`);
     return { client: _client, db: _db };
   } catch (err) {
-    console.error("MongoDB connection failed:", err);
-    throw err; // let caller handle failure
+    console.error("❌ MongoDB connection failed:", err);
+    throw err;
   }
 }
 
@@ -61,19 +42,9 @@ function getCollection(name) {
 }
 
 function isConnected() {
-  return !!(
-    _client &&
-    _client.topology &&
-    _client.topology.isConnected &&
-    _client.topology.isConnected()
-  );
+  return !!(_client && _client.topology && _client.topology.isConnected && _client.topology.isConnected());
 }
 
-/**
- * getNextSequence(sequenceName)
- * - Uses a 'counters' collection to emulate auto-increment numeric ids.
- * - Returns the incremented numeric value (Number).
- */
 async function getNextSequence(sequenceName) {
   if (!sequenceName) throw new Error("sequenceName is required");
   const col = getCollection("counters");
@@ -85,10 +56,6 @@ async function getNextSequence(sequenceName) {
   return r.value.seq;
 }
 
-/**
- * resetSequence(sequenceName, value)
- * - Sets the sequence to the given numeric value (upserts).
- */
 async function resetSequence(sequenceName, value) {
   if (!sequenceName) throw new Error("sequenceName is required");
   const col = getCollection("counters");
@@ -102,9 +69,7 @@ async function resetSequence(sequenceName, value) {
 
 async function close() {
   try {
-    if (_client) {
-      await _client.close(true);
-    }
+    if (_client) await _client.close(true);
   } finally {
     _client = null;
     _db = null;
