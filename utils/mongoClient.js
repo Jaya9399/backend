@@ -26,20 +26,33 @@ async function connect(uri, dbName, opts = {}) {
 
   // sensible defaults; you can override via opts
   const defaultOpts = {
-    // serverSelectionTimeoutMS: 5000,
-    // connectTimeoutMS: 10000,
-    // useUnifiedTopology and useNewUrlParser are defaults in modern drivers
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    tls: true,
+    tlsAllowInvalidCertificates: false, // set true only if testing
+    serverSelectionTimeoutMS: 10000,
+    connectTimeoutMS: 10000,
+    retryWrites: true,
+    appName: "RailTransExpoApp",
     ...opts,
   };
 
   _client = new MongoClient(uri, defaultOpts);
-  await _client.connect();
-  _db = _client.db(dbName);
-  return { client: _client, db: _db };
+
+  try {
+    await _client.connect();
+    _db = _client.db(dbName);
+    console.log(`Connected to MongoDB: ${uri}, DB: ${dbName}`);
+    return { client: _client, db: _db };
+  } catch (err) {
+    console.error("MongoDB connection failed:", err);
+    throw err; // let caller handle failure
+  }
 }
 
 function getDb() {
-  if (!_db) throw new Error("MongoDB not connected. Call connect(uri, dbName) first.");
+  if (!_db)
+    throw new Error("MongoDB not connected. Call connect(uri, dbName) first.");
   return _db;
 }
 
@@ -48,7 +61,12 @@ function getCollection(name) {
 }
 
 function isConnected() {
-  return !!(_client && _client.topology && _client.topology.isConnected && _client.topology.isConnected());
+  return !!(
+    _client &&
+    _client.topology &&
+    _client.topology.isConnected &&
+    _client.topology.isConnected()
+  );
 }
 
 /**
@@ -74,7 +92,11 @@ async function getNextSequence(sequenceName) {
 async function resetSequence(sequenceName, value) {
   if (!sequenceName) throw new Error("sequenceName is required");
   const col = getCollection("counters");
-  await col.updateOne({ _id: sequenceName }, { $set: { seq: Number(value) } }, { upsert: true });
+  await col.updateOne(
+    { _id: sequenceName },
+    { $set: { seq: Number(value) } },
+    { upsert: true }
+  );
   return { ok: true, sequence: sequenceName, seq: Number(value) };
 }
 
