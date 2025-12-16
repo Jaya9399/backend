@@ -1,4 +1,16 @@
-// backend/routes/tickets.js
+/**
+ * backend/routes/tickets.js
+ *
+ * Improvements:
+ * - More robust ticket lookup across common field names and common casing differences.
+ * - Tries exact match, case-insensitive match and multiple field-name variants (snake_case / camelCase).
+ * - Keeps existing behavior and fallbacks for PDF generation unchanged.
+ *
+ * NOTE: This is a best-effort lookup. If your data stores ticket codes in arbitrary nested keys
+ * or unusual field names, consider adding them to the `CANDIDATE_FIELDS` list below or creating
+ * a dedicated indexable field (e.g. ticket_code) in each collection for reliable lookups.
+ */
+
 const express = require("express");
 const router = express.Router();
 const PDFDocument = require("pdfkit");
@@ -15,7 +27,9 @@ try { generateVisitorBadgePDF = require("../utils/pdfGenerator").generateVisitor
 /* ---------- MongoDB helper ---------- */
 async function getDb() {
   if (!mongo || typeof mongo.getDb !== "function") throw new Error("mongoClient not available");
-  return await mongo.getDb();
+  const maybe = mongo.getDb();
+  if (maybe && typeof maybe.then === "function") return await maybe;
+  return maybe;
 }
 
 /* ---------- Ticket ID extraction ---------- */
@@ -85,12 +99,107 @@ function extractTicketId(raw) {
   return null;
 }
 
-/* ---------- Mongo lookup helper ---------- */
+/* ---------- Helper utilities for lookup ---------- */
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function toSnakeCase(name = "") {
+  if (!name) return name;
+  // convert camelCase or PascalCase to snake_case, and make lower-case
+  return name.replace(/([A-Z])/g, "_$1").replace(/[\- ]+/g, "_").toLowerCase().replace(/^_+/, "");
+}
+
+function uniqueArray(arr = []) {
+  return Array.from(new Set(arr.filter(Boolean)));
+}
+
+/* ---------- Mongo lookup helper (improved) ---------- */
+/**
+ * Attempts to find a document matching ticketKey in the provided collectionName.
+ *
+ * Strategy:
+ * 1) Exact match on ticket_code (fast path).
+ * 2) Case-insensitive exact match on ticket_code (regex anchored).
+ * 3) Search across a list of common ticket-related field names (exact and ci-regex).
+ *
+ * If you still cannot find documents, consider adding a dedicated indexed field
+ * (ticket_code) to your documents so lookups are reliable and fast.
+ */
+const CANDIDATE_FIELDS = [
+  "ticket_code","ticketCode","ticket_id","ticketId","ticket","ticketNo","ticketno","ticketid",
+  "code","c","id","tk","t"
+];
+
 async function findTicketInCollection(collectionName, ticketKey) {
   const db = await getDb();
   const col = db.collection(collectionName);
-  const row = await col.findOne({ ticket_code: ticketKey });
-  return row || null;
+
+  // Normalize candidate field variants (snake_case + original)
+  const fieldVariants = uniqueArray(
+    CANDIDATE_FIELDS.flatMap(f => [f, toSnakeCase(f), f.toLowerCase()])
+  );
+
+  // 1) Fast exact match on ticket_code
+  try {
+    const exact = await col.findOne({ ticket_code: ticketKey });
+    if (exact) return exact;
+  } catch (e) {
+    // ignore and continue to more robust queries
+  }
+
+  // 2) Case-insensitive anchored regex on ticket_code
+  try {
+    const regex = new RegExp(`^${escapeRegex(ticketKey)}$`, "i");
+    const ci = await col.findOne({ ticket_code: { $regex: regex } });
+    if (ci) return ci;
+  } catch (e) {}
+
+  // 3) Try candidate fields (exact then case-insensitive)
+  // Build $or with both exact and regex matches for all variants
+  const orClauses = [];
+  const anchoredRegex = { $regex: new RegExp(`^${escapeRegex(ticketKey)}$`, "i") };
+
+  for (const field of fieldVariants) {
+    // exact match clause
+    const exactClause = {};
+    exactClause[field] = ticketKey;
+    orClauses.push(exactClause);
+
+    // case-insensitive anchored regex clause
+    const regexClause = {};
+    regexClause[field] = anchoredRegex;
+    orClauses.push(regexClause);
+  }
+
+  if (orClauses.length > 0) {
+    try {
+      const row = await col.findOne({ $or: orClauses });
+      if (row) return row;
+    } catch (e) {
+      // if the query fails because some field names don't exist or invalid, ignore and proceed
+      // (Mongo will happily accept unknown field names, so failures are unlikely)
+    }
+  }
+
+  // 4) Last-resort fallback: try to find documents where any field contains the ticketKey as substring
+  // This is expensive and may require scanning — keep it optional and limited.
+  try {
+    const substringRegex = new RegExp(escapeRegex(ticketKey), "i");
+    const doc = await col.findOne({
+      $or: fieldVariants.map(f => {
+        const q = {};
+        q[f] = { $regex: substringRegex };
+        return q;
+      })
+    });
+    if (doc) return doc;
+  } catch (e) {
+    // swallow
+  }
+
+  // Not found
+  return null;
 }
 
 /* ---------- /validate route ---------- */
@@ -103,7 +212,7 @@ router.post("/validate", express.json({ limit: "2mb" }), async (req, res) => {
   if (!ticketKey) return res.status(400).json({ success: false, error: "Could not extract ticket id from payload" });
 
   try {
-    const collections = ["tickets", "speakers", "visitors", "partners"];
+    const collections = ["tickets", "speakers", "visitors", "partners", "exhibitors", "awardees"];
     let found = null;
     let entityType = null;
 
@@ -111,7 +220,7 @@ router.post("/validate", express.json({ limit: "2mb" }), async (req, res) => {
       const row = await findTicketInCollection(coll, ticketKey);
       if (row) {
         found = row;
-        entityType = coll === "tickets" ? null : coll.slice(0, -1);
+        entityType = coll === "tickets" ? null : (coll.endsWith("s") ? coll.slice(0, -1) : coll);
         break;
       }
     }
@@ -148,7 +257,7 @@ router.post("/scan", express.json({ limit: "2mb" }), async (req, res) => {
   if (!ticketKey) return res.status(400).json({ success: false, error: "Could not extract ticket id from payload" });
 
   try {
-    const collections = ["tickets", "speakers", "visitors", "partners"];
+    const collections = ["tickets", "speakers", "visitors", "partners", "exhibitors", "awardees"];
     let found = null;
     let entityType = null;
 
@@ -156,7 +265,7 @@ router.post("/scan", express.json({ limit: "2mb" }), async (req, res) => {
       const row = await findTicketInCollection(coll, ticketKey);
       if (row) {
         found = row;
-        entityType = coll === "tickets" ? null : coll.slice(0, -1);
+        entityType = coll === "tickets" ? null : (coll.endsWith("s") ? coll.slice(0, -1) : coll);
         console.log(`[tickets.scan] matched ${coll} row id=${row._id} ticket=${ticketKey}`);
         break;
       }
