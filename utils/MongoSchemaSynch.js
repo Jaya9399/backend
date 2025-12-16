@@ -1,9 +1,14 @@
-// utils/mongoSchemaSync.js
-// Sync admin-managed dynamic fields
-// ALWAYS targets unified `registrants` collection
+/**
+ * utils/mongoSchemaSync.js
+ *
+ * - Provides safeFieldName normalization function.
+ * - Tracks dynamic fields in "dynamic_fields" collection.
+ * - Creates per-collection indexes for dynamic fields.
+ *
+ * Note: This module is self-contained and does NOT import registrations (avoids circular deps).
+ */
 
 const mongo = require('./mongoClient');
-const { mapTargetCollection } = require('./registrations');
 
 function safeFieldName(name) {
   if (!name) return null;
@@ -15,30 +20,54 @@ function safeFieldName(name) {
 }
 
 async function obtainDb() {
-  if (typeof mongo.getDb === 'function') return mongo.getDb();
+  if (!mongo) throw new Error('mongoClient not available');
+  if (typeof mongo.getDb === 'function') {
+    const maybe = mongo.getDb();
+    if (maybe && typeof maybe.then === 'function') return await maybe;
+    return maybe;
+  }
   if (mongo.db) return mongo.db;
-  throw new Error('mongoClient not available');
+  throw new Error('mongoClient has no getDb/db');
 }
 
 async function ensureTrackingCollection(db) {
   const col = db.collection('dynamic_fields');
-  await col.createIndex(
-    { collectionName: 1, fieldName: 1 },
-    { unique: true, background: true }
-  ).catch(() => {});
+  try {
+    await col.createIndex(
+      { collectionName: 1, fieldName: 1 },
+      { unique: true, background: true }
+    );
+  } catch (e) {
+    // ignore
+  }
   return col;
 }
 
+function normalizeCollectionNameToPlural(collectionName) {
+  if (!collectionName) return null;
+  let s = String(collectionName).trim().toLowerCase();
+  s = s.replace(/[^a-z0-9_\-]/g, '_').replace(/_+/g, '_');
+  if (!s.endsWith('s')) s = `${s}s`;
+  return s;
+}
+
 /**
- * Sync dynamic fields to unified collection
+ * syncFieldsToCollection(collectionName, fields = [])
+ * - collectionName: logical collection (visitor(s), exhibitor(s), partner(s), etc.)
+ * - fields: array of { name, type }
+ *
+ * Behavior:
+ * - Normalizes collectionName to plural form and applies indexes to that physical collection.
+ * - Records tracked fields in 'dynamic_fields' tracking collection keyed by the target collection.
  */
 async function syncFieldsToCollection(collectionName, fields = []) {
+  if (!collectionName) throw new Error('collectionName required');
+
   const db = await obtainDb();
   const tracker = await ensureTrackingCollection(db);
 
-  // 🔑 ALWAYS normalize to registrants
-  const { target } = mapTargetCollection(collectionName);
-  const targetCol = db.collection(target); // registrants ONLY
+  const target = normalizeCollectionNameToPlural(collectionName);
+  const targetCol = db.collection(target);
 
   const desired = [];
   for (const f of fields) {
@@ -47,65 +76,74 @@ async function syncFieldsToCollection(collectionName, fields = []) {
     if (!fn) continue;
     desired.push({
       fieldName: fn,
-      origName: f.name,
-      type: f.type || 'text',
+      origName: String(f.name),
+      type: String(f.type || 'text'),
     });
   }
 
-  // 🔑 TRACK BY TARGET, NOT ROLE
-  const tracked = await tracker.find({ collectionName: target }).toArray();
-  const trackedNames = new Set(tracked.map(t => t.fieldName));
+  // Use 'collectionName' in tracker as the physical target collection
+  const trackedRows = await tracker.find({ collectionName: target }).toArray();
+  const trackedNames = new Set(trackedRows.map(r => r.fieldName));
   const desiredNames = new Set(desired.map(d => d.fieldName));
 
   const toAdd = desired.filter(d => !trackedNames.has(d.fieldName));
-  const toRemove = tracked.filter(t => !desiredNames.has(t.fieldName));
+  const toRemove = trackedRows.filter(t => !desiredNames.has(t.fieldName));
 
   const added = [];
   const removed = [];
+  const errors = [];
 
-  // ➕ Add new fields
+  // Add new fields: add tracker row and create sparse index on target collection
   for (const d of toAdd) {
-    await tracker.updateOne(
-      { collectionName: target, fieldName: d.fieldName },
-      {
-        $set: {
-          collectionName: target,
-          fieldName: d.fieldName,
-          origName: d.origName,
-          fieldType: d.type,
-          createdAt: new Date(),
+    try {
+      await tracker.updateOne(
+        { collectionName: target, fieldName: d.fieldName },
+        {
+          $set: {
+            collectionName: target,
+            fieldName: d.fieldName,
+            origName: d.origName,
+            fieldType: d.type,
+            createdAt: new Date(),
+          },
         },
-      },
-      { upsert: true }
-    );
+        { upsert: true }
+      );
 
-    const idx = {};
-    idx[d.fieldName] = 1;
+      const idx = {};
+      idx[d.fieldName] = 1;
+      await targetCol.createIndex(idx, {
+        name: `dyn_${d.fieldName}_idx`,
+        sparse: true,
+        background: true,
+      });
 
-    await targetCol.createIndex(idx, {
-      name: `dyn_${d.fieldName}_idx`,
-      sparse: true,
-      background: true,
-    }).catch(() => {});
-
-    added.push(d.fieldName);
-  }
-
-  // ➖ Remove deleted fields
-  for (const t of toRemove) {
-    const idxName = `dyn_${t.fieldName}_idx`;
-    const indexes = await targetCol.indexes();
-    if (indexes.find(i => i.name === idxName)) {
-      await targetCol.dropIndex(idxName);
+      added.push(d.fieldName);
+    } catch (e) {
+      errors.push({ add: d.fieldName, error: e && e.message ? e.message : String(e) });
     }
-    await tracker.deleteOne({ _id: t._id });
-    removed.push(t.fieldName);
   }
 
-  return { added, removed };
+  // Remove deleted fields: drop index and remove tracker row
+  for (const t of toRemove) {
+    try {
+      const idxName = `dyn_${t.fieldName}_idx`;
+      const indexes = await targetCol.indexes();
+      if (indexes.find(i => i.name === idxName)) {
+        await targetCol.dropIndex(idxName);
+      }
+      await tracker.deleteOne({ _id: t._id });
+      removed.push(t.fieldName);
+    } catch (e) {
+      errors.push({ remove: t.fieldName, error: e && e.message ? e.message : String(e) });
+    }
+  }
+
+  return { added, removed, errors };
 }
 
 module.exports = {
   syncFieldsToCollection,
   safeFieldName,
+  normalizeCollectionNameToPlural,
 };
