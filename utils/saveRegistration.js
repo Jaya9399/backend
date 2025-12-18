@@ -1,11 +1,10 @@
 /**
  * utils/registrations.js
  *
- * Ensures role-specific collections (visitors, exhibitors, partners, speakers, awardees).
- * - No 'registrants' central collection.
- * - Upserts by email within the target collection (if email present).
- * - Generates ticket_code and retries on collision.
- * - Logs mapping decisions for debugging.
+ * Role-specific upserts. Small changes:
+ * - Normalize ticket_code to trimmed string on insert/upsert.
+ * - If ticket_code is purely digits, also write ticket_code_num for easier numeric lookup.
+ * - Add debug logs when writing.
  */
 
 const mongo = require('./mongoClient');
@@ -31,18 +30,14 @@ function normalizeCollectionName(name = '') {
 }
 
 function mapTargetCollection(collectionName) {
-  // Always map known roles to their own plural collection.
   const knownRoles = new Set(['visitor', 'exhibitor', 'partner', 'speaker', 'awardee']);
   if (!collectionName) return { target: 'visitors', role: 'visitor' };
   const raw = String(collectionName).trim().toLowerCase();
   if (!raw) return { target: 'visitors', role: 'visitor' };
-
   const singular = raw.endsWith('s') ? raw.slice(0, -1) : raw;
   if (knownRoles.has(singular)) {
     return { target: `${singular}s`, role: singular };
   }
-
-  // fallback: normalized plural of provided name
   return { target: normalizeCollectionName(raw) || raw, role: null };
 }
 
@@ -74,6 +69,15 @@ async function ensureEmailUniqueIndex(db, collectionName = 'visitors') {
   }
 }
 
+function normalizeTicketCodeValue(val) {
+  if (val === undefined || val === null) return null;
+  return String(val).trim();
+}
+
+function isDigitsOnly(s) {
+  return typeof s === 'string' && /^\d+$/.test(s);
+}
+
 /* ---------------- core: saveRegistration ---------------- */
 
 async function saveRegistration(collectionName, form = {}, options = {}) {
@@ -83,13 +87,11 @@ async function saveRegistration(collectionName, form = {}, options = {}) {
 
   const { target: targetCollectionName, role } = mapTargetCollection(collectionName);
 
-  // Debug/logging to confirm mapping at runtime
   if (process.env.DEBUG_REGISTRATIONS === 'true') {
     console.log(`[registrations] saveRegistration: requested='${collectionName}' -> target='${targetCollectionName}' role='${role}'`);
   }
 
   const allowedFields = Array.isArray(options.allowedFields) ? options.allowedFields : null;
-
   const mapped = {};
   const raw = form || {};
   let whitelist = null;
@@ -123,9 +125,14 @@ async function saveRegistration(collectionName, form = {}, options = {}) {
 
   if (role) baseDoc.role = role;
 
+  // If client provided ticket_code in the form, normalize it to string
+  if (baseDoc.ticket_code !== undefined && baseDoc.ticket_code !== null) {
+    baseDoc.ticket_code = normalizeTicketCodeValue(baseDoc.ticket_code);
+    if (isDigitsOnly(baseDoc.ticket_code)) baseDoc.ticket_code_num = Number(baseDoc.ticket_code);
+  }
+
   const col = db.collection(targetCollectionName);
 
-  // best-effort index creation for this collection
   await ensureTicketCodeUniqueIndex(db, targetCollectionName);
   if (baseDoc.email) await ensureEmailUniqueIndex(db, targetCollectionName);
 
@@ -144,28 +151,46 @@ async function saveRegistration(collectionName, form = {}, options = {}) {
   if (emailNorm) {
     const filter = { email: emailNorm };
     const setOnInsertDoc = { ...baseDoc };
+    // Ensure ticket_code normalized on setOnInsert
+    if (setOnInsertDoc.ticket_code !== undefined && setOnInsertDoc.ticket_code !== null) {
+      setOnInsertDoc.ticket_code = normalizeTicketCodeValue(setOnInsertDoc.ticket_code);
+      if (isDigitsOnly(setOnInsertDoc.ticket_code)) setOnInsertDoc.ticket_code_num = Number(setOnInsertDoc.ticket_code);
+    } else {
+      setOnInsertDoc.ticket_code = normalizeTicketCodeValue(generateTicketCode());
+      if (isDigitsOnly(setOnInsertDoc.ticket_code)) setOnInsertDoc.ticket_code_num = Number(setOnInsertDoc.ticket_code);
+    }
+
     const update = { $setOnInsert: setOnInsertDoc, $set: { updatedAt: now } };
 
     const maxAttempts = 6;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (!setOnInsertDoc.ticket_code) setOnInsertDoc.ticket_code = generateTicketCode();
+      if (!setOnInsertDoc.ticket_code) setOnInsertDoc.ticket_code = normalizeTicketCodeValue(generateTicketCode());
       try {
         const opts = { upsert: true, returnDocument: 'after' };
         const result = await col.findOneAndUpdate(filter, update, opts);
         const finalDoc = result && result.value ? result.value : null;
         const insertedId = finalDoc && finalDoc._id ? String(finalDoc._id) : null;
         const existed = finalDoc && finalDoc.createdAt && finalDoc.createdAt < now;
+        if (process.env.DEBUG_REGISTRATIONS === 'true') {
+          console.log(`[registrations] upsert result -> collection=${targetCollectionName} id=${insertedId} ticket_code=${finalDoc && finalDoc.ticket_code}`);
+        }
         return { insertedId, doc: finalDoc, existed: !!existed };
       } catch (err) {
         const isDup = err && (err.code === 11000 || (err.errmsg && err.errmsg.indexOf('E11000') !== -1));
         if (isDup && attempt < maxAttempts) {
-          setOnInsertDoc.ticket_code = generateTicketCode();
+          setOnInsertDoc.ticket_code = normalizeTicketCodeValue(generateTicketCode());
+          if (isDigitsOnly(setOnInsertDoc.ticket_code)) setOnInsertDoc.ticket_code_num = Number(setOnInsertDoc.ticket_code);
           continue;
         }
         if (isDup) {
           try {
             const existing = await col.findOne(filter);
-            if (existing) return { insertedId: existing && existing._id ? String(existing._id) : null, doc: existing, existed: true };
+            if (existing) {
+              if (process.env.DEBUG_REGISTRATIONS === 'true') {
+                console.log(`[registrations] duplicate collision -> returning existing id=${existing._id} ticket_code=${existing.ticket_code}`);
+              }
+              return { insertedId: existing && existing._id ? String(existing._id) : null, doc: existing, existed: true };
+            }
           } catch (e2) {}
         }
         throw err;
@@ -177,16 +202,20 @@ async function saveRegistration(collectionName, form = {}, options = {}) {
   // No email => insert
   const maxAttemptsNoEmail = 6;
   for (let attempt = 1; attempt <= maxAttemptsNoEmail; attempt++) {
-    if (!baseDoc.ticket_code) baseDoc.ticket_code = generateTicketCode();
+    if (!baseDoc.ticket_code) baseDoc.ticket_code = normalizeTicketCodeValue(generateTicketCode());
+    if (isDigitsOnly(baseDoc.ticket_code)) baseDoc.ticket_code_num = Number(baseDoc.ticket_code);
     try {
       const r = await col.insertOne(baseDoc);
       const stored = await col.findOne({ _id: r.insertedId });
       const insertedId = r && r.insertedId ? String(r.insertedId) : null;
+      if (process.env.DEBUG_REGISTRATIONS === 'true') {
+        console.log(`[registrations] inserted -> collection=${targetCollectionName} id=${insertedId} ticket_code=${stored && stored.ticket_code}`);
+      }
       return { insertedId, doc: stored || baseDoc, existed: false };
     } catch (err) {
       const isDup = err && (err.code === 11000 || (err.errmsg && err.errmsg.indexOf('E11000') !== -1));
       if (isDup && attempt < maxAttemptsNoEmail) {
-        baseDoc.ticket_code = generateTicketCode();
+        baseDoc.ticket_code = normalizeTicketCodeValue(generateTicketCode());
         continue;
       }
       throw err;

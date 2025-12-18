@@ -72,10 +72,7 @@ function genOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-/* ---------- role normalization ----------
-   Registrations are stored in single 'registrants' collection with role: 'visitor' (singular).
-   Normalize incoming registrationType to canonical singular role.
-*/
+/* ---------- role normalization ---------- */
 function normalizeToRole(t = "") {
   if (!t) return null;
   const s = String(t).trim().toLowerCase();
@@ -90,84 +87,112 @@ function normalizeToRole(t = "") {
   return map[singular] || null;
 }
 
-/* ---------- Mongo lookup (works with structure you provided) ----------
-   Checks:
-    - role matches canonical role (visitor/exhibitor/...)
-    - email in candidate paths: top-level email OR data.email OR form.email (anchored, case-insensitive)
-   Returns detailed info or null.
+/* ---------- helper: map role -> collection ---------- */
+function roleToCollection(role) {
+  if (!role) return null;
+  return `${role}s`; // e.g. visitor -> visitors
+}
+const KNOWN_COLLECTIONS = ["visitors","exhibitors","partners","speakers","awardees"];
+
+/* ---------- Mongo lookup (fixed) ----------
+   Now checks:
+    - the per-role collection derived from registrationType (e.g. "visitors")
+    - if not found, falls back to searching all known role collections
+   It preserves your path checks (email, data.email, form.email, data.emailAddress, data.contactEmail).
 */
 async function findExistingByEmailMongo(emailRaw, registrationType) {
   try {
     const db = await obtainDb();
     if (!db) return null;
-    const coll = db.collection("registrants");
     const emailNorm = normalizeEmail(emailRaw);
     if (!emailNorm) return null;
+
     const role = normalizeToRole(registrationType);
-    if (!role) return null;
+    const collectionsToTry = [];
+
+    if (role) {
+      collectionsToTry.push(roleToCollection(role));
+    }
+    // ensure we always also try the legacy "registrants" (if you still have it) and the known collections
+    collectionsToTry.push("registrants");
+    for (const c of KNOWN_COLLECTIONS) {
+      if (!collectionsToTry.includes(c)) collectionsToTry.push(c);
+    }
 
     const regex = new RegExp(`^\\s*${escapeRegex(emailNorm)}\\s*$`, "i");
-    const query = {
-      role,
-      $or: [
-        { email: { $regex: regex } },
-        { "data.email": { $regex: regex } },
-        { "form.email": { $regex: regex } },
-        { "data.emailAddress": { $regex: regex } },
-        { "data.contactEmail": { $regex: regex } },
-      ],
-    };
+    const candidatePaths = ["email", "data.email", "form.email", "data.emailAddress", "data.contactEmail"];
 
-    const projection = { _id: 1, ticket_code: 1, name: 1, company: 1, mobile: 1, email: 1, data: 1, form: 1, role: 1 };
-    const doc = await coll.findOne(query, { projection });
-    if (!doc) return null;
+    for (const colName of collectionsToTry) {
+      if (!colName) continue;
+      try {
+        const coll = db.collection(colName);
+        // avoid query error if collection doesn't exist by using try/catch
+        const q = {
+          $or: candidatePaths.map(p => {
+            // convert dotted path to nested query object like { "data.email": { $regex: regex } }
+            const obj = {};
+            obj[p] = { $regex: regex };
+            return obj;
+          })
+        };
+        // also filter by role if we searched a shared collection 'registrants'
+        if (colName === "registrants" && role) q.role = role;
 
-    // prefer the path that contains the normalized email
-    const candidatePaths = ["data.email", "email", "form.email", "data.emailAddress", "data.contactEmail"];
-    let matchedPath = null;
-    let emailValue = null;
-    for (const p of candidatePaths) {
-      const parts = p.split(".");
-      let v = doc;
-      for (const part of parts) {
-        if (v && typeof v === "object" && Object.prototype.hasOwnProperty.call(v, part)) v = v[part];
-        else { v = undefined; break; }
-      }
-      if (typeof v === "string" && v.trim() && normalizeEmail(v) === emailNorm) {
-        matchedPath = p;
-        emailValue = v.trim();
-        break;
+        const projection = { _id: 1, ticket_code: 1, name: 1, company: 1, mobile: 1, email: 1, data: 1, form: 1, role: 1 };
+        const doc = await coll.findOne(q, { projection });
+        if (!doc) continue;
+
+        // figure out matched path
+        let matchedPath = null;
+        let emailValue = null;
+        for (const p of candidatePaths) {
+          const parts = p.split(".");
+          let v = doc;
+          for (const part of parts) {
+            if (v && typeof v === "object" && Object.prototype.hasOwnProperty.call(v, part)) v = v[part];
+            else { v = undefined; break; }
+          }
+          if (typeof v === "string" && v.trim() && normalizeEmail(v) === emailNorm) {
+            matchedPath = p;
+            emailValue = v.trim();
+            break;
+          }
+        }
+        if (!matchedPath) {
+          if (doc.email) { matchedPath = "email"; emailValue = String(doc.email).trim(); }
+          else if (doc.data && doc.data.email) { matchedPath = "data.email"; emailValue = String(doc.data.email).trim(); }
+          else emailValue = emailNorm;
+        }
+
+        return {
+          id: doc._id ? String(doc._id) : null,
+          ticket_code: doc.ticket_code || null,
+          emailColumn: matchedPath || null,
+          emailValue: emailValue || null,
+          name: doc.name || (doc.data && doc.data.name) || null,
+          mobile: doc.mobile || (doc.data && doc.data.mobile) || null,
+          collection: colName,
+          role: doc.role || role || null,
+        };
+      } catch (e) {
+        // skip this collection on error and continue to next
+        console.warn(`[otp] findExistingByEmailMongo: collection ${colName} check failed:`, e && e.message ? e.message : e);
+        continue;
       }
     }
-    if (!matchedPath) {
-      // fallback to top-level email or first found
-      if (doc.email) { matchedPath = "email"; emailValue = String(doc.email).trim(); }
-      else if (doc.data && doc.data.email) { matchedPath = "data.email"; emailValue = String(doc.data.email).trim(); }
-      else emailValue = emailNorm;
-    }
-
-    return {
-      id: doc._id ? String(doc._id) : null,
-      ticket_code: doc.ticket_code || null,
-      emailColumn: matchedPath || null,
-      emailValue: emailValue || null,
-      name: doc.name || doc.data?.name || null,
-      mobile: doc.mobile || doc.data?.mobile || null,
-    };
+    return null;
   } catch (err) {
     console.error("[otp] findExistingByEmailMongo error:", err && (err.stack || err.message || err));
     return null;
   }
 }
 
-/* ---------- check-email debug endpoint ----------
-   GET /api/otp/check-email?email=...&type=visitor
-   returns { success:true, found: true/false, info? }
-*/
+/* ---------- check-email endpoint ---------- */
 router.get("/check-email", async (req, res) => {
   try {
     const email = normalizeEmail(req.query.email || "");
     const registrationType = String(req.query.type || "").trim();
+
     if (!isValidEmail(email)) return res.status(400).json({ success: false, error: "invalid email" });
     if (!registrationType) return res.status(400).json({ success: false, error: "missing registrationType" });
 
@@ -180,11 +205,7 @@ router.get("/check-email", async (req, res) => {
   }
 });
 
-/* ---------- POST /api/otp/send ----------
-   Body: { type: "email", value: "<email>", requestId?, registrationType: "visitor" }
-   - if existing found -> responds 409 with existing info
-   - otherwise generates OTP, sends (or jsonTransport) and returns success
-*/
+/* ---------- POST /api/otp/send ---------- */
 router.post("/send", express.json({ limit: "2mb" }), async (req, res) => {
   try {
     const { value, registrationType } = req.body || {};
@@ -194,7 +215,7 @@ router.post("/send", express.json({ limit: "2mb" }), async (req, res) => {
     const emailNorm = normalizeEmail(value);
     const regType = String(registrationType).trim();
 
-    // check existing in registrants
+    // check existing in registrants/per-role collections
     const existing = await findExistingByEmailMongo(emailNorm, regType);
     if (existing) {
       return res.status(409).json({
@@ -250,7 +271,7 @@ router.post("/verify", express.json({ limit: "2mb" }), async (req, res) => {
     // consume
     otpStore.delete(key);
 
-    // after verification, check if existing registrant (helps UI show upgrade)
+    // after verification, check if existing registrant
     try {
       const existing = await findExistingByEmailMongo(emailKey, regType);
       if (existing) return res.json({ success: true, email: emailKey, registrationType: regType, existing });
