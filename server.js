@@ -149,6 +149,18 @@ const imageUploadRouter = (() => { try { return require('./routes/imageUpload');
 let adminRouter = null;
 try { adminRouter = require('./routes/adminConfig'); } catch (e) { adminRouter = null; }
 
+// registration-configs router (centralized registration field configs)
+const registrationConfigsRouter = (() => {
+  try {
+    const r = require('./routes/registration-configs');
+    console.log('Loaded ./routes/registration-configs ->', !!r);
+    return r;
+  } catch (e) {
+    console.warn('No ./routes/registration-configs router found (optional).', e && e.message ? e.message : e);
+    return null;
+  }
+})();
+
 // --- Mount routes (always relative paths) ---
 // Visitors
 if (visitorsRouter) app.use('/api/visitors', visitorsRouter); else console.warn('No visitors router found');
@@ -213,6 +225,14 @@ if (ticketsUpgradeRouter) app.use('/api/tickets', ticketsUpgradeRouter);
 if (imageUploadRouter) app.use('/api', imageUploadRouter); else console.warn('No image upload router found (routes/imageUpload.js missing)');
 
 if (adminRouter) app.use('/api', adminRouter);
+
+// Registration configs router (new centralized configs collection)
+if (registrationConfigsRouter) {
+  app.use('/api/registration-configs', registrationConfigsRouter);
+  console.log('Mounted /api/registration-configs');
+} else {
+  console.warn('No registration-configs router found - frontend will fallback to per-endpoint config sources.');
+}
 
 // --- Unified configs route (new) ---
 let configsRouter = null;
@@ -310,6 +330,7 @@ const PORT = process.env.PORT ;
       console.log(' - /api/exhibitor-config ->', exhibitorConfigRouter ? 'mounted' : 'fallback/none');
       console.log(' - /api/speaker-config ->', (speakerConfigMongoRouter || speakerConfigRouter) ? 'mounted' : 'fallback/none');
       console.log(' - /api/awardee-config ->', awardeeConfigRouter ? 'mounted' : 'fallback/none');
+      console.log(' - /api/registration-configs ->', registrationConfigsRouter ? 'mounted' : 'fallback/none');
       console.log(' - /api/otp ->', otpRouter ? 'mounted' : 'fallback/none');
       console.log(' - /api/mailer ->', emailRouter ? 'mounted' : 'fallback/none');
       console.log(' - /api/configs ->', configsRouter ? 'mounted' : 'fallback/none');
