@@ -222,47 +222,60 @@ router.post("/scan", express.json({ limit: "2mb" }), async (req, res) => {
   try {
     const incoming = req.body?.ticketId !== undefined ? req.body.ticketId : req.body?.raw;
     const ticketKey = extractTicketId(incoming);
-    if (!ticketKey) return res.status(400).json({ error: "Invalid ticket" });
+    if (!ticketKey) {
+      return res.status(400).json({ error: "Invalid ticket" });
+    }
 
     const found = await findTicket(ticketKey);
-    if (!found) return res.status(404).json({ error: "Not found" });
+    if (!found) {
+      return res.status(404).json({ error: "Not found" });
+    }
 
     const { doc } = found;
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename=visitor-${ticketKey}.pdf`);
+    res.setHeader("Content-Disposition", `inline; filename=ticket-${ticketKey}.pdf`);
 
-    const pdf = new PDFDocument({ size: [350, 450], margin: 12 });
+    const pdf = new PDFDocument({ size: [300, 450], margin: 20 });
     pdf.pipe(res);
 
-    // Header
-    pdf.fontSize(18).text("VISITOR PASS", { align: "center" });
-    pdf.moveDown(0.5);
-
-    // Visitor Info
-    pdf.fontSize(12).text(`Name: ${doc.name || ""}`);
-    pdf.text(`Email: ${doc.email || ""}`);
-    pdf.text(`Company: ${doc.company || doc.org || ""}`);
-    pdf.text(`Role: ${doc.role || "Attendee"}`);
-    pdf.text(`Phone: ${doc.phone || ""}`);
+    // Title
+    pdf.fontSize(18).font("Helvetica-Bold").text("RailTrans Expo 2026", { align: "center" });
     pdf.moveDown(1);
 
-    // Ticket code
-    pdf.fontSize(14).text(`Ticket: ${ticketKey}`, { align: "center" });
+    // Only show Name
+    pdf.fontSize(16).font("Helvetica-Bold").text(doc.name || "", { align: "center" });
     pdf.moveDown(1);
 
-    // QR code
-    const qrData = await QRCode.toDataURL(ticketKey);
-    const base64Data = qrData.replace(/^data:image\/png;base64,/, "");
-    const imgBuffer = Buffer.from(base64Data, "base64");
-    pdf.image(imgBuffer, pdf.page.width / 2 - 60, pdf.y, { width: 120 });
+    // Generate QR code data URL with ticketKey encoded
+    const qrDataUrl = await QRCode.toDataURL(ticketKey);
+
+    // Decode base64 image part and embed in PDF
+    const qrImageBase64 = qrDataUrl.split(",")[1];
+    const qrImageBuffer = Buffer.from(qrImageBase64, "base64");
+
+    // Add QR code image centered
+    const qrSize = 180;
+    const qrX = (pdf.page.width - qrSize) / 2;
+    pdf.image(qrImageBuffer, qrX, pdf.y, { width: qrSize, height: qrSize });
+    pdf.moveDown(1.5);
+
+    // Optional small text below QR code
+    pdf.fontSize(10).font("Helvetica-Oblique").fillColor("gray").text("Scan at entry", { align: "center" });
+
+    pdf.moveDown(3);
+
+    // Footer text like "FREE"
+    pdf.fontSize(24).font("Helvetica-Bold").fillColor("green").text("FREE", { align: "center" });
 
     pdf.end();
+
   } catch (e) {
     console.error("tickets-scan scan error:", e && (e.stack || e));
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 
 /* debug-check - returns diagnostics about where it checked (helpful when scanning fails) */
