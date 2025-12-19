@@ -132,7 +132,17 @@ const emailRouter = (() => {
 
 const paymentRouter = (() => { try { return require('./routes/payment'); } catch (e) { console.warn('no payment router', e && (e.message)); return null; } })();
 const remindersRouter = (() => { try { return require('./routes/reminders'); } catch (e) { return null; } })();
-const ticketsScanRouter = (() => { try { return require('./routes/tickets-scan'); } catch (e) { return null; } })();
+const ticketsScanRouter = (() => {
+  try {
+    const r = require('./routes/tickets-scan');
+    console.log('✅ Loaded ./routes/tickets-scan');
+    return r;
+  } catch (e) {
+    console.error('❌ Failed to load ./routes/tickets-scan:', e.stack || e);
+    return null;
+  }
+})();
+
 const ticketsUpgradeRouter = (() => { try { return require('./routes/tickets-upgrade'); } catch (e) { return null; } })();
 const imageUploadRouter = (() => { try { return require('./routes/imageUpload'); } catch (e) { return null; } })();
 
