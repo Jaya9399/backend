@@ -94,11 +94,11 @@ function roleToCollection(role) {
 }
 const KNOWN_COLLECTIONS = ["visitors","exhibitors","partners","speakers","awardees"];
 
-/* ---------- Mongo lookup (fixed) ----------
-   Now checks:
-    - the per-role collection derived from registrationType (e.g. "visitors")
-    - if not found, falls back to searching all known role collections
-   It preserves your path checks (email, data.email, form.email, data.emailAddress, data.contactEmail).
+/* ---------- Mongo lookup (updated) ----------
+   Behavior:
+    - If registrationType (role) provided and valid -> try [roleCollection, "registrants"] only (stop on first match).
+    - If no valid role provided -> try ["registrants", ...KNOWN_COLLECTIONS].
+   This avoids checking unrelated collections (e.g. visitors) when role is explicitly given.
 */
 async function findExistingByEmailMongo(emailRaw, registrationType) {
   try {
@@ -108,34 +108,41 @@ async function findExistingByEmailMongo(emailRaw, registrationType) {
     if (!emailNorm) return null;
 
     const role = normalizeToRole(registrationType);
-    const collectionsToTry = [];
+    let collectionsToTry = [];
 
     if (role) {
-      collectionsToTry.push(roleToCollection(role));
+      // Strict: only check the role-specific collection first, then legacy registrants.
+      const roleCol = roleToCollection(role);
+      collectionsToTry = [roleCol, "registrants"];
+    } else {
+      // No role provided: search registrants then all known collections
+      collectionsToTry = ["registrants", ...KNOWN_COLLECTIONS];
     }
-    // ensure we always also try the legacy "registrants" (if you still have it) and the known collections
-    collectionsToTry.push("registrants");
-    for (const c of KNOWN_COLLECTIONS) {
-      if (!collectionsToTry.includes(c)) collectionsToTry.push(c);
-    }
+
+    // Remove duplicates just in case
+    collectionsToTry = Array.from(new Set(collectionsToTry.filter(Boolean)));
 
     const regex = new RegExp(`^\\s*${escapeRegex(emailNorm)}\\s*$`, "i");
     const candidatePaths = ["email", "data.email", "form.email", "data.emailAddress", "data.contactEmail"];
+
+    // Optional debug: list attempted collections in logs when running in debug mode
+    if (process.env.DEBUG_FIND_EMAIL === "true") {
+      console.debug(`[otp] findExistingByEmailMongo: trying collections: ${collectionsToTry.join(", ")}`);
+    }
 
     for (const colName of collectionsToTry) {
       if (!colName) continue;
       try {
         const coll = db.collection(colName);
-        // avoid query error if collection doesn't exist by using try/catch
+        // Build OR query for candidate paths
         const q = {
           $or: candidatePaths.map(p => {
-            // convert dotted path to nested query object like { "data.email": { $regex: regex } }
             const obj = {};
             obj[p] = { $regex: regex };
             return obj;
           })
         };
-        // also filter by role if we searched a shared collection 'registrants'
+        // Narrow 'registrants' by role if role present
         if (colName === "registrants" && role) q.role = role;
 
         const projection = { _id: 1, ticket_code: 1, name: 1, company: 1, mobile: 1, email: 1, data: 1, form: 1, role: 1 };
