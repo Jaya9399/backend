@@ -158,75 +158,20 @@ const CANDIDATE_FIELDS = ["ticket_code","ticket_code_num","ticketCode","ticket_i
    - tries candidate fields with exact and case-insensitive anchored regex,
    - falls back to scanning documents that have candidate fields or _rawForm (limited).
 */
-async function findTicket(ticketKey) {
+async function findTicket(ticketCode) {
   const db = await getDb();
-  const keyStr = String(ticketKey).trim();
-  const isNum = /^\d+$/.test(keyStr);
-  const keyNum = isNum ? Number(keyStr) : null;
+  const codeStr = String(ticketCode);
+  const codeNum = Number(codeStr);
 
-  for (const collName of COLLECTIONS) {
-    const col = db.collection(collName);
-
-    // 1: exact ticket_code string
-    try {
-      const exact = await col.findOne({ ticket_code: keyStr });
-      if (exact) return { doc: exact, collection: collName };
-    } catch (e) { /* ignore */ }
-
-    // 1b: ticket_code_num (numeric field)
-    if (keyNum !== null) {
-      try {
-        const exactNum = await col.findOne({ ticket_code_num: keyNum });
-        if (exactNum) return { doc: exactNum, collection: collName };
-      } catch (e) {}
-    }
-
-    // 1c: ticket_code stored as number
-    if (keyNum !== null) {
-      try {
-        const exactNum2 = await col.findOne({ ticket_code: keyNum });
-        if (exactNum2) return { doc: exactNum2, collection: collName };
-      } catch (e) {}
-    }
-
-    // 2: candidate fields via $or (exact string/number and anchored case-insensitive regex)
-    try {
-      const or = [];
-      for (const f of CANDIDATE_FIELDS) {
-        const objStr = {}; objStr[f] = keyStr; or.push(objStr);
-        // case insensitive anchored regex
-        const objRe = {}; objRe[f] = { $regex: new RegExp(`^${escapeRegex(keyStr)}$`, "i") }; or.push(objRe);
-        if (keyNum !== null) { const objNum = {}; objNum[f] = keyNum; or.push(objNum); }
-      }
-      if (or.length) {
-        const row = await col.findOne({ $or: or });
-        if (row) return { doc: row, collection: collName };
-      }
-    } catch (e) { /* ignore */ }
-
-    // 3: controlled JS scan fallback, limited to docs that have candidate fields or _rawForm
-    try {
-      const existsClauses = CANDIDATE_FIELDS.map(f => ({ [f]: { $exists: true } }));
-      existsClauses.push({ _rawForm: { $exists: true } });
-      const cursor = col.find({ $or: existsClauses }).limit(Number(process.env.TICKET_SCAN_SCAN_LIMIT || 1000));
-      while (await cursor.hasNext()) {
-        const d = await cursor.next();
-        // quick checks on candidate fields
-        for (const f of CANDIDATE_FIELDS) {
-          if (!Object.prototype.hasOwnProperty.call(d, f)) continue;
-          const v = d[f];
-          if (v === undefined || v === null) continue;
-          if (keyNum !== null && typeof v === "number" && v === keyNum) return { doc: d, collection: collName };
-          if (String(v).trim() === keyStr) return { doc: d, collection: collName };
-          if (typeof v === "string" && String(v).trim().toLowerCase() === keyStr.toLowerCase()) return { doc: d, collection: collName };
-        }
-        // deep inspect the document
-        const found = extractTicketIdFromObject(d);
-        if (found && String(found).trim() === keyStr) return { doc: d, collection: collName };
-      }
-    } catch (e) { /* ignore */ }
+  for (const coll of COLLECTIONS) {
+    const doc = await db.collection(coll).findOne({
+      $or: [
+        { ticket_code: codeStr },
+        { ticket_code_num: codeNum }
+      ]
+    });
+    if (doc) return { doc, collection: coll };
   }
-
   return null;
 }
 
@@ -236,19 +181,21 @@ router.get("/__ping", (req, res) => {
   res.json({ ok: true, router: "tickets-scan" });
 });
 
-router.post("/validate", express.json({ limit: "2mb" }), async (req, res) => {
+router.post("/validate", express.json(), async (req, res) => {
   try {
-    const incoming = req.body?.ticketId !== undefined ? req.body.ticketId : req.body?.raw;
-    const ticketKey = extractTicketId(incoming);
-    if (!ticketKey) {
-      if (process.env.DEBUG_TICKETS === "true") console.log("[tickets-scan] validate: could not extract from payload:", req.body);
-      return res.status(400).json({ success: false, error: "Invalid ticket" });
+    const raw = req.body?.ticketId;
+    if (raw === undefined || raw === null) {
+      return res.status(400).json({ success: false, error: "Missing ticketId" });
     }
 
-    const found = await findTicket(ticketKey);
+    const ticketCode = String(raw).trim();
+    if (!/^\d+$/.test(ticketCode)) {
+      return res.status(400).json({ success: false, error: "Invalid ticket_code" });
+    }
+
+    const found = await findTicket(ticketCode);
     if (!found) {
-      const debug = process.env.DEBUG_TICKETS === "true" ? { extracted: ticketKey } : undefined;
-      return res.status(404).json({ success: false, error: "Ticket not found", debug });
+      return res.status(404).json({ success: false, error: "Ticket not found" });
     }
 
     const { doc, collection } = found;
@@ -256,19 +203,18 @@ router.post("/validate", express.json({ limit: "2mb" }), async (req, res) => {
     res.json({
       success: true,
       ticket: {
-        ticket_code: doc.ticket_code,
+        ticket_code: doc.ticket_code,   // ✅ name is ticket_code
         entity_type: collection,
-        name: doc.name || doc.full_name || "",
+        name: doc.name || "",
         email: doc.email || "",
-        company: doc.company || doc.org || "",
-        category: doc.category || ""
+        company: doc.company || "",
       }
     });
   } catch (e) {
-    console.error("tickets-scan validate error:", e && (e.stack || e));
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
+
 
 router.post("/scan", express.json({ limit: "2mb" }), async (req, res) => {
   try {
