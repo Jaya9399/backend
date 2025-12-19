@@ -216,34 +216,46 @@ router.post("/validate", express.json(), async (req, res) => {
 });
 
 
+const QRCode = require("qrcode");
+
 router.post("/scan", express.json({ limit: "2mb" }), async (req, res) => {
   try {
     const incoming = req.body?.ticketId !== undefined ? req.body.ticketId : req.body?.raw;
     const ticketKey = extractTicketId(incoming);
-    if (!ticketKey) {
-      return res.status(400).json({ error: "Invalid ticket" });
-    }
+    if (!ticketKey) return res.status(400).json({ error: "Invalid ticket" });
 
     const found = await findTicket(ticketKey);
-    if (!found) {
-      return res.status(404).json({ error: "Not found" });
-    }
+    if (!found) return res.status(404).json({ error: "Not found" });
 
     const { doc } = found;
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename=ticket-${ticketKey}.pdf`);
+    res.setHeader("Content-Disposition", `inline; filename=visitor-${ticketKey}.pdf`);
 
-    const pdf = new PDFDocument({ size: [300, 450], margin: 12 });
+    const pdf = new PDFDocument({ size: [350, 450], margin: 12 });
     pdf.pipe(res);
 
-    pdf.fontSize(16).text("EVENT ENTRY PASS", { align: "center" });
-    pdf.moveDown();
+    // Header
+    pdf.fontSize(18).text("VISITOR PASS", { align: "center" });
+    pdf.moveDown(0.5);
+
+    // Visitor Info
     pdf.fontSize(12).text(`Name: ${doc.name || ""}`);
     pdf.text(`Email: ${doc.email || ""}`);
     pdf.text(`Company: ${doc.company || doc.org || ""}`);
-    pdf.moveDown();
+    pdf.text(`Role: ${doc.role || "Attendee"}`);
+    pdf.text(`Phone: ${doc.phone || ""}`);
+    pdf.moveDown(1);
+
+    // Ticket code
     pdf.fontSize(14).text(`Ticket: ${ticketKey}`, { align: "center" });
+    pdf.moveDown(1);
+
+    // QR code
+    const qrData = await QRCode.toDataURL(ticketKey);
+    const base64Data = qrData.replace(/^data:image\/png;base64,/, "");
+    const imgBuffer = Buffer.from(base64Data, "base64");
+    pdf.image(imgBuffer, pdf.page.width / 2 - 60, pdf.y, { width: 120 });
 
     pdf.end();
   } catch (e) {
@@ -251,6 +263,7 @@ router.post("/scan", express.json({ limit: "2mb" }), async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 /* debug-check - returns diagnostics about where it checked (helpful when scanning fails) */
 router.post("/debug-check", express.json({ limit: "2mb" }), async (req, res) => {
