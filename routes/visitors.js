@@ -214,7 +214,7 @@ router.delete('/:id', async (req, res) => {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
-    const coll = db.collection('visiotors');
+    const coll = db.collection('visitors');
     const id = req.params.id;
     const q = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
     q.role = 'visitor';
