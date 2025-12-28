@@ -2,8 +2,9 @@ const express = require("express");
 const router = express.Router();
 const mongo = require("../utils/mongoClient"); // should export getDb() or .db
 const { ObjectId } = require("mongodb");
+const mailer = require("../utils/mailer"); // expects sendMail(opts) -> { success, info?, error?, dbRecordId? }
 
-// reuse safeFieldName if available to normalize admin field names
+// optional safeFieldName from your schema utils
 let safeFieldName = null;
 try {
   safeFieldName = require("../utils/mongoSchemaSync").safeFieldName;
@@ -11,57 +12,33 @@ try {
   /* optional */
 }
 
-router.use(express.json({ limit: "5mb" }));
+router.use(express.json({ limit: "6mb" }));
 
-/**
- * obtainDb()
- * Accept both mongo.getDb() (async) and mongo.db sync shapes.
- */
+/* ---------- helpers ---------- */
 async function obtainDb() {
   if (!mongo) return null;
-  if (typeof mongo.getDb === "function") {
-    const db = await mongo.getDb();
-    return db;
-  }
+  if (typeof mongo.getDb === "function") return await mongo.getDb();
   if (mongo.db) return mongo.db;
   return null;
-}
-
-function pick(v, keys) {
-  for (const k of keys)
-    if (v && Object.prototype.hasOwnProperty.call(v, k)) return v[k];
-  return undefined;
 }
 
 function generateTicketCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-/**
- * loadAdminFields(pageName)
- * Loads admin configured fields from registration_configs collection and
- * returns a Set of safe (normalized) names and the original fields array.
- */
 async function loadAdminFields(db, pageName = "visitor") {
   try {
     const col = db.collection("registration_configs");
     const doc = await col.findOne({ page: pageName });
-    const fields =
-      doc && doc.config && Array.isArray(doc.config.fields)
-        ? doc.config.fields
-        : [];
+    const fields = doc && doc.config && Array.isArray(doc.config.fields) ? doc.config.fields : [];
     const safeNames = new Set();
     for (const f of fields) {
       if (!f || !f.name) continue;
-      const name = String(f.name).trim();
-      if (!name) continue;
-      const sn =
-        typeof safeFieldName === "function"
-          ? safeFieldName(name)
-          : name
-              .toLowerCase()
-              .replace(/[\s-]+/g, "_")
-              .replace(/[^a-z0-9_]/g, "");
+      const raw = String(f.name).trim();
+      if (!raw) continue;
+      const sn = typeof safeFieldName === "function"
+        ? safeFieldName(raw)
+        : raw.toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
       if (sn) safeNames.add(sn);
     }
     return { fields, safeNames };
@@ -70,115 +47,222 @@ async function loadAdminFields(db, pageName = "visitor") {
   }
 }
 
+/* pick first sensible string from object using candidate keys */
+function pickFirstString(obj, candidates = []) {
+  if (!obj || typeof obj !== "object") return "";
+  for (const cand of candidates) {
+    if (Object.prototype.hasOwnProperty.call(obj, cand)) {
+      const v = obj[cand];
+      if (typeof v === "string" && v.trim()) return v.trim();
+      if ((typeof v === "number" || typeof v === "boolean") && String(v).trim()) return String(v).trim();
+    }
+    // case-insensitive key match
+    for (const k of Object.keys(obj)) {
+      if (k.toLowerCase() === String(cand).toLowerCase()) {
+        const v = obj[k];
+        if (typeof v === "string" && v.trim()) return v.trim();
+        if ((typeof v === "number" || typeof v === "boolean") && String(v).trim()) return String(v).trim();
+      }
+    }
+  }
+  // deep scan
+  for (const v of Object.values(obj)) {
+    if (!v) continue;
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (v && typeof v === "object") {
+      if (typeof v.email === "string" && v.email.trim()) return v.email.trim();
+      if (typeof v.mobile === "string" && v.mobile.trim()) return v.mobile.trim();
+      if (typeof v.phone === "string" && v.phone.trim()) return v.phone.trim();
+      if (typeof v.name === "string" && v.name.trim()) return v.name.trim();
+      if (typeof v.company === "string" && v.company.trim()) return v.company.trim();
+    }
+  }
+  return "";
+}
+
+/* Try to require server-side buildTicketEmail if present */
+let serverBuildTicketEmail = null;
+try {
+  const tmpl = require("../utils/emailTemplate");
+  if (tmpl && typeof tmpl.buildTicketEmail === "function") serverBuildTicketEmail = tmpl.buildTicketEmail;
+} catch (e) {
+  serverBuildTicketEmail = null;
+}
+
+/* Minimal server-side email builder fallback */
+function buildSimpleTicketEmail({ frontendBase = "", entity = "visitors", id = "", name = "", ticket_code = "" } = {}) {
+  const fb = String(frontendBase || process.env.FRONTEND_BASE || "").replace(/\/$/, "");
+  const downloadUrl = fb
+    ? `${fb}/ticket-download?entity=${encodeURIComponent(entity)}&${id ? `id=${encodeURIComponent(String(id))}` : `ticket_code=${encodeURIComponent(String(ticket_code || ""))}`}`
+    : `ticket_download_unavailable`;
+
+  const subject = `RailTrans Expo — Your e-badge & ticket`;
+  const text = [
+    `Hello ${name || "Participant"},`,
+    "",
+    `Thank you for registering for RailTrans Expo.`,
+    ticket_code ? `Your ticket code: ${ticket_code}` : "",
+    `Download your e-badge: ${downloadUrl}`,
+    "",
+    "Regards,",
+    "RailTrans Expo Team",
+  ].filter(Boolean).join("\n");
+
+  const html = `<p>Hello ${name || "Participant"},</p>
+<p>Thank you for registering for RailTrans Expo.</p>
+${ticket_code ? `<p><strong>Your ticket code:</strong> ${ticket_code}</p>` : ""}
+<p><a href="${downloadUrl}" target="_blank" rel="noopener noreferrer">Download your e-badge</a></p>
+<p>Regards,<br/>RailTrans Expo Team</p>`;
+
+  return { subject, text, html };
+}
+
+/* ---------- Routes ---------- */
+
 /**
  * POST /api/visitors
- * Save a visitor into registrants collection (role: 'visitor')
- * - stores raw form under data
- * - promotes admin-configured fields to top-level normalized keys for easy querying
+ * Save visitor dynamically based on admin-configured fields,
+ * preserve raw form at data, generate ticket_code if needed,
+ * attempt to send email server-side (prefer serverBuildTicketEmail if available),
+ * return saved doc + mail result.
  */
 router.post("/", async (req, res) => {
   try {
     const db = await obtainDb();
-    if (!db)
-      return res
-        .status(500)
-        .json({ success: false, message: "database not available" });
+    if (!db) return res.status(500).json({ success: false, message: "database not available" });
 
     const coll = db.collection("visitors");
     const body = req.body || {};
     const form = body._rawForm || body.form || body || {};
 
-    const nameRaw =
-      body.name ??
-      form.name ??
-      (form.firstName && form.lastName
-        ? `${form.firstName} ${form.lastName}`
-        : "");
-
-    const name =
-      typeof nameRaw === "string"
-        ? nameRaw.trim()
-        : String(nameRaw || "").trim();
-
-    const emailRaw = body.email ?? form.email ?? form.emailAddress ?? "";
-    const email =
-      typeof emailRaw === "string"
-        ? emailRaw.trim()
-        : String(emailRaw || "").trim();
-
-    const mobileRaw = body.mobile ?? form.mobile ?? form.phone ?? "";
-    const mobile =
-      typeof mobileRaw === "string"
-        ? mobileRaw.trim()
-        : String(mobileRaw || "").trim();
+    // determine friendly name / email / mobile from common keys (dynamic)
+    const name = body.name || pickFirstString(form, ["name", "fullName", "contactName", "firstName", "first_name", "firstname"]) || "";
+    const email = String(body.email || form.email || form.emailAddress || pickFirstString(form, ["email", "emailAddress", "contactEmail"])) || "";
+    const mobile = body.mobile || form.mobile || form.phone || pickFirstString(form, ["mobile", "phone", "contact", "contactNumber", "mobileNumber"]) || "";
 
     if (!email || typeof email !== "string" || !email.includes("@")) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Valid email is required." });
+      return res.status(400).json({ success: false, message: "Valid email is required." });
     }
 
-    const ticket_code =
-      body.ticket_code || form.ticket_code || generateTicketCode();
+    // generate or pick ticket code
+    const ticket_code = body.ticket_code || form.ticket_code || generateTicketCode();
 
-    // Base document
+    // base doc: minimal top-level fixed fields only
     const doc = {
       role: "visitor",
-      data: form, // preserve full raw form
+      data: form,
       name: name || null,
       email: email || null,
       mobile: mobile || null,
       ticket_code: ticket_code || null,
-      ticket_category: body.ticket_category || form.ticket_category || null,
-      ticket_price: Number(body.ticket_price || form.ticket_price || 0) || 0,
-      ticket_gst: Number(body.ticket_gst || form.ticket_gst || 0) || 0,
-      ticket_total: Number(body.ticket_total || form.ticket_total || 0) || 0,
-      txId: body.txId || form.txId || null,
-      payment_proof_url:
-        body.payment_proof_url || form.payment_proof_url || null,
       status: "new",
       createdAt: new Date(),
       updatedAt: new Date(),
+      // preserve admin marker if admin added it
+      added_by_admin: !!body.added_by_admin,
+      admin_created_at: body.added_by_admin ? (body.admin_created_at || new Date().toISOString()) : undefined,
     };
 
-    // Promote admin-configured fields to top-level normalized keys if present in submission
+    // Promote only admin-configured fields (dynamic)
     try {
       const { safeNames } = await loadAdminFields(db, "visitor");
       for (const [k, v] of Object.entries(form || {})) {
         if (!k) continue;
-        const sn =
-          typeof safeFieldName === "function"
-            ? safeFieldName(k)
-            : String(k)
-                .trim()
-                .toLowerCase()
-                .replace(/[\s-]+/g, "_")
-                .replace(/[^a-z0-9_]/g, "");
+        const sn = typeof safeFieldName === "function"
+          ? safeFieldName(k)
+          : String(k).trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
         if (!sn) continue;
-        // only promote keys that are in admin configured safe names
         if (safeNames.has(sn)) {
-          // avoid clobbering reserved top-level fields
-          if (["role", "data", "createdAt", "updatedAt", "_id"].includes(sn))
-            continue;
+          // avoid reserved keys
+          if (["role", "data", "createdAt", "updatedAt", "_id"].includes(sn)) continue;
           doc[sn] = v === undefined ? null : v;
         }
       }
     } catch (e) {
-      // non-fatal: if admin-config load fails, we still insert raw form
-      console.warn(
-        "[visitors] failed to promote admin fields:",
-        e && (e.stack || e)
-      );
+      console.warn("[visitors] promote admin fields error:", e && (e.stack || e));
     }
 
-    const r = await coll.insertOne(doc);
-    const insertedId = r && r.insertedId ? String(r.insertedId) : null;
+    // insert into DB
+    const result = await coll.insertOne(doc);
+    const insertedId = result && result.insertedId ? String(result.insertedId) : null;
+
+    // ensure ticket_code persisted
+    if (doc.ticket_code && result && result.insertedId) {
+      try {
+        await coll.updateOne({ _id: result.insertedId }, { $set: { ticket_code: doc.ticket_code } });
+      } catch (e) { /* ignore */ }
+    }
+
+    // build createdDoc to return (include promoted keys for UI convenience)
+    const createdDoc = {
+      id: insertedId,
+      _id: insertedId,
+      name: doc.name,
+      email: doc.email,
+      ticket_code: doc.ticket_code,
+      added_by_admin: !!doc.added_by_admin,
+      // include promoted fields (choose to return only safe promoted names)
+    };
+
+    // attach promoted fields to createdDoc for immediate UI use
+    try {
+      const { safeNames } = await loadAdminFields(db, "visitor");
+      for (const sn of safeNames) {
+        if (Object.prototype.hasOwnProperty.call(doc, sn)) createdDoc[sn] = doc[sn];
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Attempt to send email server-side (try serverBuildTicketEmail if available)
+    let mailResult = null;
+    try {
+      const frontendBase = process.env.FRONTEND_BASE || "";
+      if (serverBuildTicketEmail) {
+        // build full template server-side if available
+        try {
+          const model = {
+            frontendBase,
+            entity: "visitors",
+            id: insertedId,
+            name: doc.name || "",
+            company: doc.company || doc.org || "",
+            ticket_category: doc.ticket_category || "",
+            badgePreviewUrl: "",
+            downloadUrl: "",
+            logoUrl: "",
+            form: doc.data || {},
+            pdfBase64: null,
+          };
+          const tpl = await serverBuildTicketEmail(model);
+          const mailOpts = { to: email, subject: tpl.subject || "RailTrans Expo", text: tpl.text || "", html: tpl.html || "", attachments: tpl.attachments || [] };
+          const sendRes = await mailer.sendMail(mailOpts);
+          if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+          else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : "send failed", dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+        } catch (e) {
+          // fallback to simple send
+          const minimal = buildSimpleTicketEmail({ frontendBase, entity: "visitors", id: insertedId, name: doc.name || "", ticket_code: doc.ticket_code || "" });
+          const sendRes = await mailer.sendMail({ to: email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
+          if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+          else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : "send failed", dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+        }
+      } else {
+        const minimal = buildSimpleTicketEmail({ frontendBase, entity: "visitors", id: insertedId, name: doc.name || "", ticket_code: doc.ticket_code || "" });
+        const sendRes = await mailer.sendMail({ to: email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
+        if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+        else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : "send failed", dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+      }
+    } catch (mailErr) {
+      mailResult = { ok: false, error: String(mailErr && (mailErr.message || mailErr)) };
+    }
 
     return res.json({
       success: true,
       message: "Visitor registered successfully.",
       insertedId,
       ticket_code: doc.ticket_code || null,
+      saved: createdDoc,
+      mail: mailResult,
     });
   } catch (err) {
     console.error("[visitors] POST error", err && (err.stack || err));
@@ -190,242 +274,46 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.post("/step", async (req, res) => {
+router.post('/:id/resend-email', async (req, res) => {
   try {
     const db = await obtainDb();
-    if (!db)
-      return res
-        .status(500)
-        .json({ success: false, error: "database not available" });
-    const col = db.collection("steps");
-    const payload = { ...req.body, createdAt: new Date() };
-    try {
-      await col.insertOne(payload);
-    } catch (e) {
-      console.warn("[visitors] step insert failed", e && e.message);
-    }
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("[visitors] /step error", err && (err.stack || err));
-    return res
-      .status(500)
-      .json({ success: false, error: "Failed to save step" });
-  }
-});
-
-/**
- * GET /api/visitors
- * Query params: q (search), limit, skip
- */
-router.get("/", async (req, res) => {
-  try {
-    const db = await obtainDb();
-    if (!db) return res.status(500).json({ error: "database not available" });
-
-    const coll = db.collection("visitors");
-    const q = (req.query.q || "").trim();
-    const limit = Math.min(
-      1000,
-      Math.max(1, parseInt(req.query.limit || "200", 10))
-    );
-    const skip = Math.max(0, parseInt(req.query.skip || "0", 10));
-
-    const filter = { role: "visitor" };
-    if (q) {
-      filter.$or = [
-        { email: { $regex: q, $options: "i" } },
-        { name: { $regex: q, $options: "i" } },
-        { ticket_code: { $regex: q, $options: "i" } },
-        { "data.email": { $regex: q, $options: "i" } },
-        { "data.name": { $regex: q, $options: "i" } },
-      ];
+    if (!db) {
+      return res.status(500).json({ ok: false, error: 'Database not available' });
     }
 
-    const cursor = coll
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    const rows = await cursor.toArray();
-    const out = rows.map((r) => {
-      const copy = { ...r };
-      if (copy._id) {
-        copy.id = String(copy._id);
-        delete copy._id;
-      }
-      return copy;
+    const { id } = req.params;
+
+    const visitor = await db.collection('visitors').findOne({
+      _id: new require('mongodb').ObjectId(id),
     });
-    return res.json(out);
+
+    if (!visitor) {
+      return res.status(404).json({ ok: false, error: 'Visitor not found' });
+    }
+
+    if (!visitor.email) {
+      return res.status(400).json({ ok: false, error: 'No email on record' });
+    }
+
+    // 🔹 call your existing mail helper
+    const mail = await sendRegistrationEmail({
+      to: visitor.email,
+      data: visitor,
+      type: 'visitor',
+    });
+
+    // optional: store mail status
+    await db.collection('visitors').updateOne(
+      { _id: visitor._id },
+      { $set: { last_mail: mail, last_mail_at: new Date() } }
+    );
+
+    return res.json({ ok: true, mail });
   } catch (err) {
-    console.error("[visitors] GET error", err && (err.stack || err));
-    return res.status(500).json({ error: "Failed to fetch visitors" });
+    console.error('resend-email error', err);
+    return res.status(500).json({ ok: false, error: 'Failed to resend email' });
   }
 });
 
-/**
- * GET /api/visitors/:id
- */
-router.get("/:id", async (req, res) => {
-  try {
-    const db = await obtainDb();
-    if (!db) return res.status(500).json({ error: "database not available" });
-
-    const coll = db.collection("visitors");
-    const id = req.params.id;
-    const q = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
-    q.role = "visitor";
-    const doc = await coll.findOne(q);
-    if (!doc) return res.status(404).json({ error: "Visitor not found" });
-    const copy = { ...doc };
-    if (copy._id) {
-      copy.id = String(copy._id);
-      delete copy._id;
-    }
-    return res.json(copy);
-  } catch (err) {
-    console.error("[visitors] GET/:id error", err && (err.stack || err));
-    return res.status(500).json({ error: "Failed to fetch visitor" });
-  }
-});
-
-/**
- * DELETE /api/visitors/:id
- */
-router.delete("/:id", async (req, res) => {
-  try {
-    const db = await obtainDb();
-    if (!db)
-      return res
-        .status(500)
-        .json({ success: false, error: "database not available" });
-
-    const coll = db.collection("visitors");
-    const id = req.params.id;
-    const q = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
-    q.role = "visitor";
-    const r = await coll.deleteOne(q);
-    if (!r.deletedCount)
-      return res
-        .status(404)
-        .json({ success: false, error: "Visitor not found" });
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("[visitors] DELETE error", err && (err.stack || err));
-    return res
-      .status(500)
-      .json({ success: false, error: "Failed to delete visitor" });
-  }
-});
-
-/**
- * POST /api/visitors/:id/confirm
- * Update allowed fields; do NOT overwrite ticket_code unless force=true
- * Also accepts admin-configured normalized fields (safe names).
- */
-router.post("/:id/confirm", async (req, res) => {
-  try {
-    const db = await obtainDb();
-    if (!db)
-      return res
-        .status(500)
-        .json({ success: false, error: "database not available" });
-
-    const coll = db.collection("visitors");
-    const id = req.params.id;
-    const payload = { ...(req.body || {}) };
-    const force = !!payload.force;
-    delete payload.force;
-
-    const q = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
-    q.role = "visitor";
-    const doc = await coll.findOne(q);
-    if (!doc)
-      return res
-        .status(404)
-        .json({ success: false, error: "Visitor not found" });
-
-    // base whitelist
-    const baseWhitelist = new Set([
-      "ticket_code",
-      "ticket_category",
-      "txId",
-      "email",
-      "name",
-      "company",
-      "mobile",
-      "designation",
-      "slots",
-    ]);
-
-    // include admin-configured safe names
-    try {
-      const { safeNames } = await loadAdminFields(db, "visitor");
-      for (const sn of safeNames) baseWhitelist.add(sn);
-    } catch (e) {
-      // ignore
-    }
-
-    const update = {};
-    for (const k of Object.keys(payload || {})) {
-      // accept if in whitelist or if normalized safeName is in whitelist
-      if (baseWhitelist.has(k)) {
-        update[k] = payload[k];
-        continue;
-      }
-      const sn =
-        typeof safeFieldName === "function"
-          ? safeFieldName(k)
-          : String(k)
-              .trim()
-              .toLowerCase()
-              .replace(/[\s-]+/g, "_")
-              .replace(/[^a-z0-9_]/g, "");
-      if (sn && baseWhitelist.has(sn)) {
-        update[sn] = payload[k];
-      }
-    }
-
-    // ticket_code defensive handling
-    if ("ticket_code" in update) {
-      const incoming = update.ticket_code
-        ? String(update.ticket_code).trim()
-        : "";
-      const existingCode = doc.ticket_code
-        ? String(doc.ticket_code).trim()
-        : "";
-      if (!incoming) delete update.ticket_code;
-      else if (existingCode && !force && incoming !== existingCode)
-        delete update.ticket_code;
-    }
-
-    if (Object.keys(update).length === 0) {
-      const copy = { ...doc };
-      if (copy._id) {
-        copy.id = String(copy._id);
-        delete copy._id;
-      }
-      return res.json({
-        success: true,
-        updated: copy,
-        note: "No changes applied (ticket_code protected)",
-      });
-    }
-
-    update.updatedAt = new Date();
-    await coll.updateOne({ _id: doc._id }, { $set: update });
-    const after = await coll.findOne({ _id: doc._id });
-    const copyAfter = { ...after };
-    if (copyAfter._id) {
-      copyAfter.id = String(copyAfter._id);
-      delete copyAfter._id;
-    }
-    return res.json({ success: true, updated: copyAfter });
-  } catch (err) {
-    console.error("[visitors] POST confirm error", err && (err.stack || err));
-    return res
-      .status(500)
-      .json({ success: false, error: "Failed to update visitor" });
-  }
-});
 
 module.exports = router;
