@@ -1,14 +1,15 @@
 /**
  * utils/registrations.js
  *
- * Role-specific upserts. Small changes:
- * - Normalize ticket_code to trimmed string on insert/upsert.
- * - If ticket_code is purely digits, also write ticket_code_num for easier numeric lookup.
- * - Add debug logs when writing.
+ * Role-specific upserts and ticket generation + email helpers.
+ *
+ * NOTE: this file provides helpers. You still need to wire an Express route
+ * to call generateTicketForId/sendTicketEmail (example route file provided).
  */
 
-const mongo = require('./mongoClient');
-const { safeFieldName } = require('./mongoSchemaSync'); // reuse normalization
+const mongo = require('./mongoClient'); // your existing mongo client
+const { safeFieldName } = require('./mongoSchemaSync') || {}; // reuse normalization if present
+const { ObjectId } = require('mongodb');
 
 async function obtainDb() {
   if (!mongo) throw new Error('mongoClient not available');
@@ -78,7 +79,7 @@ function isDigitsOnly(s) {
   return typeof s === 'string' && /^\d+$/.test(s);
 }
 
-/* ---------------- core: saveRegistration ---------------- */
+/* ---------------- core: saveRegistration (unchanged except returns doc) ---------------- */
 
 async function saveRegistration(collectionName, form = {}, options = {}) {
   if (!collectionName) throw new Error('collectionName required');
@@ -225,6 +226,88 @@ async function saveRegistration(collectionName, form = {}, options = {}) {
   throw new Error('Failed to save registration after attempts');
 }
 
+/* ---------------- ticket generation and email helpers ---------------- */
+
+/**
+ * Ensure a ticket_code exists for a document and persist it.
+ * Returns the updated document (or null if not found).
+ *
+ * - collectionName can be 'visitors' or other plural collection name.
+ */
+async function generateTicketForId(collectionName, id, options = {}) {
+  const db = options.db || await obtainDb();
+  if (!db) throw new Error('db not available');
+  const coll = db.collection(collectionName);
+  let oid;
+  try {
+    oid = typeof id === 'string' && ObjectId.isValid(id) ? ObjectId(id) : id;
+  } catch (e) {
+    oid = id;
+  }
+  const doc = await coll.findOne({ _id: oid });
+  if (!doc) return null;
+
+  if (doc.ticket_code) {
+    // already has a ticket
+    return doc;
+  }
+
+  // try to set a unique ticket_code with retries
+  const maxAttempts = 6;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const ticket = normalizeTicketCodeValue(generateTicketCode());
+    try {
+      const updateRes = await coll.findOneAndUpdate(
+        { _id: doc._id, $or: [{ ticket_code: { $exists: false } }, { ticket_code: null }] },
+        { $set: { ticket_code: ticket, ticket_code_generated_at: new Date() } },
+        { returnDocument: 'after' }
+      );
+      if (updateRes && updateRes.value) {
+        return updateRes.value;
+      }
+      // If no value returned, document already had ticket_code set by another process - read it
+      const fresh = await coll.findOne({ _id: doc._id });
+      if (fresh) return fresh;
+    } catch (err) {
+      const isDup = err && (err.code === 11000 || (err.errmsg && err.errmsg.indexOf('E11000') !== -1));
+      if (isDup && attempt < maxAttempts) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Failed to generate unique ticket code');
+}
+
+/**
+ * Send ticket email (requires a mailer implementation).
+ * mailer must expose sendMail({ to, subject, html, text })
+ *
+ * Returns mailer result or throws.
+ */
+async function sendTicketEmail(doc, options = {}) {
+  const mailer = options.mailer || null;
+  if (!doc) throw new Error('document required');
+  if (!doc.email) throw new Error('no email to send to');
+
+  const ticket = doc.ticket_code || '';
+  const subject = options.subject || 'Your event ticket';
+  const html = options.html || `<p>Hi ${doc.name || ''},</p><p>Your ticket code is <strong>${ticket}</strong></p>`;
+  const text = options.text || `Hello ${doc.name || ''}\nYour ticket code is: ${ticket}`;
+
+  if (!mailer || typeof mailer.sendMail !== 'function') {
+    // No mailer wired — log and return a noop result for now
+    console.warn('[registrations] sendTicketEmail: no mailer configured, skipping send. Payload:', { to: doc.email, subject, ticket });
+    return { ok: false, skipped: true };
+  }
+
+  // mailer.sendMail should return a promise
+  const result = await mailer.sendMail({ to: doc.email, subject, html, text });
+  return result;
+}
+
+/* ---------------- ensure indexes utility ---------------- */
+
 async function ensureIndexes(dbArg) {
   const db = dbArg || await obtainDb();
   try {
@@ -245,4 +328,6 @@ module.exports = {
   ensureTicketCodeUniqueIndex,
   generateTicketCode,
   ensureIndexes,
+  generateTicketForId,
+  sendTicketEmail,
 };

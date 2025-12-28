@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient'); // must expose getDb() or .db
+const mailer = require('../utils/mailer'); // expects sendMail(opts) -> { success, info?, error?, dbRecordId? }
 
 // parse JSON bodies for routes in this router
-router.use(express.json({ limit: '5mb' }));
+router.use(express.json({ limit: '6mb' }));
 
+/* ---------- helpers ---------- */
 async function obtainDb() {
   if (!mongo) return null;
   if (typeof mongo.getDb === 'function') return await mongo.getDb();
@@ -41,9 +43,49 @@ function generateTicketCode() {
   return String(Math.floor(10000 + Math.random() * 90000));
 }
 
+/* Try to require server-side buildTicketEmail if present (your frontend template supports Node) */
+let serverBuildTicketEmail = null;
+try {
+  const tmpl = require('../utils/emailTemplate');
+  if (tmpl && typeof tmpl.buildTicketEmail === 'function') serverBuildTicketEmail = tmpl.buildTicketEmail;
+} catch (e) {
+  serverBuildTicketEmail = null;
+}
+
+/* Minimal server-side email builder fallback for speakers */
+function buildSimpleSpeakerEmail({ frontendBase = '', id = '', name = '', ticket_code = '' } = {}) {
+  const fb = String(frontendBase || process.env.FRONTEND_BASE || '').replace(/\/$/, '');
+  const downloadUrl = fb
+    ? `${fb}/ticket-download?entity=${encodeURIComponent('speakers')}&${id ? `id=${encodeURIComponent(String(id))}` : `ticket_code=${encodeURIComponent(String(ticket_code || ''))}`}`
+    : 'ticket_download_unavailable';
+
+  const subject = `RailTrans Expo — Thank you for registering as a Speaker`;
+  const text = [
+    `Hello ${name || 'Speaker'},`,
+    '',
+    `Thank you for registering for RailTrans Expo.`,
+    ticket_code ? `Your registration code: ${ticket_code}` : '',
+    `Download your e-badge: ${downloadUrl}`,
+    '',
+    'Regards,',
+    'RailTrans Expo Team',
+  ].filter(Boolean).join('\n');
+
+  const html = `<p>Hello ${name || 'Speaker'},</p>
+<p>Thank you for registering for RailTrans Expo.</p>
+${ticket_code ? `<p><strong>Your registration code:</strong> ${ticket_code}</p>` : ''}
+<p><a href="${downloadUrl}" target="_blank" rel="noopener noreferrer">Download your e-badge</a></p>
+<p>Regards,<br/>RailTrans Expo Team</p>`;
+
+  return { subject, text, html };
+}
+
+/* ---------- Routes ---------- */
+
 /**
  * POST /api/speakers
- * Create new speaker
+ * Create new speaker and attempt to send confirmation email server-side.
+ * Response includes { success, insertedId, ticket_code, saved, mail }
  */
 router.post('/', async (req, res) => {
   try {
@@ -56,10 +98,11 @@ router.post('/', async (req, res) => {
     if (typeof payload.slots === 'string') {
       try { payload.slots = JSON.parse(payload.slots); } catch { /* keep as string */ }
     }
-    // ensure consistent fields
+
+    // Build document (keep minimal top-level fields)
     const doc = {
       name: payload.name || payload.fullName || '',
-      email: payload.email || '',
+      email: (payload.email || '').toString().trim(),
       mobile: payload.mobile || payload.phone || '',
       designation: payload.designation || '',
       company: payload.company || '',
@@ -70,18 +113,84 @@ router.post('/', async (req, res) => {
       other_details: payload.other_details || payload.otherDetails || '',
       created_at: new Date(),
       registered_at: payload.registered_at ? new Date(payload.registered_at) : new Date(),
+      // preserve admin flag if present
+      added_by_admin: !!payload.added_by_admin,
+      admin_created_at: payload.added_by_admin ? (payload.admin_created_at || new Date().toISOString()) : undefined,
     };
 
     // ticket_code: allow incoming, else generate
     doc.ticket_code = payload.ticket_code || payload.ticketCode || generateTicketCode();
 
+    // Insert document
     const col = db.collection('speakers');
     const r = await col.insertOne(doc);
     const insertedId = r.insertedId ? String(r.insertedId) : null;
 
-    // return the saved row (with id)
+    // ensure ticket_code persisted
+    if (doc.ticket_code && r && r.insertedId) {
+      try { await col.updateOne({ _id: r.insertedId }, { $set: { ticket_code: doc.ticket_code } }); } catch (e) { /* ignore */ }
+    }
+
+    // prepare response object
     const saved = await col.findOne({ _id: r.insertedId });
-    return res.json({ success: true, insertedId, ticket_code: doc.ticket_code, saved: docToOutput(saved) });
+    const output = docToOutput(saved);
+
+    // Attempt to send confirmation email server-side (best-effort)
+    let mailResult = null;
+    try {
+      const frontendBase = process.env.FRONTEND_BASE || '';
+      if (serverBuildTicketEmail) {
+        // server-side HTML template available — use it
+        try {
+          const model = {
+            frontendBase,
+            entity: 'speakers',
+            id: insertedId,
+            name: doc.name || '',
+            company: doc.company || '',
+            ticket_category: doc.ticket_category || '',
+            badgePreviewUrl: '',
+            downloadUrl: '',
+            logoUrl: '',
+            form: doc || {},
+            pdfBase64: null,
+          };
+          const tpl = await serverBuildTicketEmail(model);
+          const sendRes = await mailer.sendMail({
+            to: doc.email,
+            subject: tpl.subject || 'RailTrans Expo — Registration',
+            text: tpl.text || '',
+            html: tpl.html || '',
+            attachments: tpl.attachments || [],
+          });
+          if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+          else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+        } catch (e) {
+          // fallback to simple email if template build or send fails
+          const minimal = buildSimpleSpeakerEmail({ frontendBase, id: insertedId, name: doc.name || '', ticket_code: doc.ticket_code || '' });
+          const sendRes = await mailer.sendMail({ to: doc.email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
+          if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+          else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+        }
+      } else {
+        // no server template — use simple fallback
+        const minimal = buildSimpleSpeakerEmail({ frontendBase, id: insertedId, name: doc.name || '', ticket_code: doc.ticket_code || '' });
+        const sendRes = await mailer.sendMail({ to: doc.email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
+        if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+        else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+      }
+    } catch (mailErr) {
+      mailResult = { ok: false, error: String(mailErr && (mailErr.message || mailErr)) };
+    }
+
+    // return saved document and mail result
+    return res.json({
+      success: true,
+      insertedId,
+      ticket_code: doc.ticket_code,
+      saved: output,
+      mail: mailResult,
+    });
   } catch (err) {
     console.error('POST /api/speakers (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to create speaker' });
@@ -89,8 +198,69 @@ router.post('/', async (req, res) => {
 });
 
 /**
+ * POST /api/speakers/:id/resend-email
+ * Resend confirmation email for speaker using server template if available
+ */
+router.post('/:id/resend-email', async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ success: false, error: 'missing id' });
+
+    const db = await obtainDb();
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
+
+    const col = db.collection('speakers');
+    const q = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
+    const doc = await col.findOne(q);
+    if (!doc) return res.status(404).json({ success: false, error: 'speaker not found' });
+
+    const email = doc.email || (doc.data && (doc.data.email || doc.data.emailAddress)) || '';
+    if (!email || typeof email !== 'string' || !email.includes('@')) return res.status(400).json({ success: false, error: 'no valid email on record' });
+
+    const frontendBase = process.env.FRONTEND_BASE || '';
+    let mailResult = null;
+    try {
+      if (serverBuildTicketEmail) {
+        const model = {
+          frontendBase,
+          entity: 'speakers',
+          id: String(doc._id || id),
+          name: doc.name || '',
+          company: doc.company || '',
+          ticket_category: doc.ticket_category || '',
+          badgePreviewUrl: '',
+          downloadUrl: '',
+          logoUrl: '',
+          form: doc || {},
+        };
+        const tpl = await serverBuildTicketEmail(model);
+        const sendRes = await mailer.sendMail({ to: email, subject: tpl.subject || 'RailTrans Expo', text: tpl.text || '', html: tpl.html || '', attachments: tpl.attachments || [] });
+        if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+        else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+      } else {
+        const minimal = buildSimpleSpeakerEmail({ frontendBase, id: String(doc._id || id), name: doc.name || '', ticket_code: doc.ticket_code || '' });
+        const sendRes = await mailer.sendMail({ to: email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
+        if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
+        else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
+      }
+    } catch (e) {
+      console.error('POST /api/speakers/:id/resend-email error:', e && (e.stack || e));
+      mailResult = { ok: false, error: String(e && (e.message || e)) };
+    }
+
+    if (mailResult && mailResult.ok) return res.json({ success: true, mail: mailResult });
+    return res.status(500).json({ success: false, mail: mailResult || { ok: false, error: 'send failed' } });
+  } catch (err) {
+    console.error('POST /api/speakers/:id/resend-email (server) error:', err && (err.stack || err));
+    return res.status(500).json({ success: false, error: 'server error' });
+  }
+});
+
+/* ---------- Existing speaker CRUD routes (list, get, confirm, put, delete) ---------- */
+
+/**
  * GET /api/speakers
- * Get all speakers
+ * Get all speakers (limit 1000)
  */
 router.get('/', async (req, res) => {
   try {

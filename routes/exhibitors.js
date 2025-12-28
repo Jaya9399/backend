@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
-const mongo = require('../utils/mongoClient'); // should expose getDb() or .db
+const mongo = require('../utils/mongoClient'); // must expose getDb() or .db
 const { sendMail } = require('../utils/mailer'); // keep existing mailer
+const path = require('path');
+const fs = require('fs');
 
 // parse JSON bodies for all routes in this router
 router.use(express.json({ limit: '5mb' }));
@@ -23,6 +25,61 @@ function toObjectId(id) {
   } catch {
     return null;
   }
+}
+
+function docToOutput(doc) {
+  if (!doc) return null;
+  const out = { ...(doc || {}) };
+  if (out._id) {
+    out.id = String(out._id);
+    delete out._id;
+  }
+  return out;
+}
+
+/**
+ * Build the acknowledgement email body (text + html)
+ * and return { subject, text, html, from? }.
+ * Subject per request set to "Hello Adarsh Shah,".
+ */
+function buildExhibitorAckEmail({ name = '' } = {}) {
+  const subject = 'Hello Adarsh Shah,'; // per your instruction
+  const text = `Hello ${name},
+
+Thank you for showing your interest and choosing to be a part of RailTrans Expo. We truly appreciate your decision to connect with us and explore exhibiting opportunities at our platform.
+
+We are pleased to confirm that your exhibitor request has been successfully received. Our team is currently reviewing the details shared by you and will get back to you shortly with the next steps.
+
+Should you require any further information, clarification, or assistance in the meantime, please feel free to reach out to us at support@railtransexpo.com. Our team will be happy to assist you.
+
+We look forward to the possibility of welcoming you as an exhibitor at RailTrans Expo.
+
+Warm regards,
+RailTrans Expo Team
+Urban Infra Group
+📧 support@railtransexpo.com
+🌐 https://www.railtransexpo.com
+`;
+
+  const html = `<p>Hello ${name},</p>
+<p>Thank you for showing your interest and choosing to be a part of <strong>RailTrans Expo</strong>. We truly appreciate your decision to connect with us and explore exhibiting opportunities at our platform.</p>
+
+<p>We are pleased to confirm that your exhibitor request has been <strong>successfully received</strong>. Our team is currently reviewing the details shared by you and will get back to you shortly with the next steps.</p>
+
+<p>Should you require any further information, clarification, or assistance in the meantime, please feel free to reach out to us at <a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a>. Our team will be happy to assist you.</p>
+
+<p>We look forward to the possibility of welcoming you as an exhibitor at RailTrans Expo.</p>
+
+<p>Warm regards,<br/>
+<strong>RailTrans Expo Team</strong><br/>
+Urban Infra Group<br/>
+📧 <a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a><br/>
+🌐 <a href="https://www.railtransexpo.com" target="_blank" rel="noopener noreferrer">www.railtransexpo.com</a>
+</p>`;
+
+  // Optional from: use env or default
+  const from = process.env.MAIL_FROM || `RailTrans Expo <support@railtransexpo.com>`;
+  return { subject, text, html, from };
 }
 
 /**
@@ -122,22 +179,19 @@ router.post('/', async (req, res) => {
         if (!insertedId) return;
         const saved = await col.findOne({ _id: toObjectId(insertedId) });
         const to = (saved && saved.email) || body.email || null;
+        const name = (saved && (saved.name || saved.company)) || companyVal || '';
+
         if (to) {
-          const name = (saved && (saved.name || saved.company)) || companyVal || '';
-          const subject = 'RailTrans Expo — We received your exhibitor request';
-          const text = `Hello ${name},
-
-Thank you for your exhibitor request. We have received your details and our team will get back to you soon.
-
-Regards,
-RailTrans Expo Team`;
-          const html = `<p>Hello ${name},</p><p>Thank you for your exhibitor request. We have received your details and our team will get back to you soon.</p><p>Regards,<br/>RailTrans Expo Team</p>`;
+          // Build email using the provided template and subject (greeting)
+          const mail = buildExhibitorAckEmail({ name });
           try {
-            await sendMail({ to, subject, text, html });
+            await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
             console.debug('[exhibitors] ack email sent to', to);
           } catch (e) {
             console.error('[exhibitors] ack email failed:', e && (e.message || e));
           }
+        } else {
+          console.warn('[exhibitors] partner saved but no email present; skipping ack mail');
         }
 
         const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
@@ -169,6 +223,54 @@ RailTrans Expo Team`;
 });
 
 /**
+ * POST /api/exhibitors/:id/resend-email
+ * Resend acknowledgement/ack email for exhibitor (admin action)
+ */
+router.post('/:id/resend-email', async (req, res) => {
+  try {
+    const id = req.params.id;
+    console.debug('[exhibitors] resend-email called for id=', id);
+    if (!id) return res.status(400).json({ success: false, error: 'missing id' });
+
+    const db = await obtainDb();
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
+
+    const oid = toObjectId(id);
+    if (!oid) return res.status(400).json({ success: false, error: 'invalid id' });
+
+    const col = db.collection('exhibitors');
+    const doc = await col.findOne({ _id: oid });
+    if (!doc) return res.status(404).json({ success: false, error: 'exhibitor not found' });
+
+    const email = doc.email || (doc.data && (doc.data.email || doc.data.emailAddress)) || '';
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return res.status(400).json({ success: false, error: 'no valid email on record' });
+    }
+
+    const name = doc.name || doc.company || '';
+    try {
+      const mail = buildExhibitorAckEmail({ name });
+      const sendRes = await sendMail({ to: email, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
+      // Normalise send result if your sendMail returns { success } or throws
+      if (sendRes && (sendRes.success || sendRes.ok)) {
+        return res.json({ success: true, mail: { ok: true, info: sendRes.info || sendRes } });
+      } else if (sendRes && sendRes.error) {
+        return res.status(500).json({ success: false, mail: { ok: false, error: sendRes.error } });
+      } else {
+        // If sendMail returns undefined but didn't throw, assume success
+        return res.json({ success: true, mail: { ok: true } });
+      }
+    } catch (e) {
+      console.error('[exhibitors] resend-email send error:', e && (e.stack || e));
+      return res.status(500).json({ success: false, mail: { ok: false, error: e && (e.message || String(e)) } });
+    }
+  } catch (err) {
+    console.error('[exhibitors] resend-email error:', err && (err.stack || err));
+    return res.status(500).json({ success: false, error: 'Server error resending email' });
+  }
+});
+
+/**
  * POST /api/exhibitors/notify
  * Notify exhibitor and admins
  */
@@ -190,7 +292,12 @@ router.post('/notify', async (req, res) => {
 
     const to = exhibitor.email || exhibitor.contactEmail || exhibitor.emailAddress;
     const subject = 'RailTrans Expo — Notification';
-    const text = `Hello,\n\nThis is a notification regarding your exhibitor registration.\n\nRegards,\nRailTrans Expo Team`;
+    const text = `Hello,
+
+This is a notification regarding your exhibitor registration.
+
+Regards,
+RailTrans Expo Team`;
     const html = `<p>Hello,</p><p>This is a notification regarding your exhibitor registration.</p>`;
 
     const results = { partnerMail: null, adminResults: [] };
@@ -353,10 +460,8 @@ router.post('/:id/approve', async (req, res) => {
         try {
           const to = updated.email;
           const name = updated.name || updated.company || '';
-          const subject = `Your exhibitor request has been approved — RailTrans Expo`;
-          const text = `Hello ${name},\n\nYour exhibitor registration (ID: ${updated._id}) has been approved.\n\nRegards,\nRailTrans Expo Team`;
-          const html = `<p>Hello ${name},</p><p>Your exhibitor registration (ID: <strong>${updated._id}</strong>) has been <strong>approved</strong>.</p>`;
-          await sendMail({ to, subject, text, html });
+          const mail = buildExhibitorAckEmail({ name });
+          await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
         } catch (e) {
           console.error('[exhibitors] approval email error:', e && (e.stack || e));
         }
@@ -408,7 +513,7 @@ router.post('/:id/cancel', async (req, res) => {
 
     const updated = await col.findOne({ _id: oid });
     const copy = { ...updated };
-    if (copy._id) { copy.id = String(copy._id); delete copy._id; }
+    if (copy._1d) { copy.id = String(copy._id); delete copy._id; }
 
     res.json({ success: true, id, updated: copy });
 
@@ -418,10 +523,8 @@ router.post('/:id/cancel', async (req, res) => {
         try {
           const to = updated.email;
           const name = updated.name || updated.company || '';
-          const subject = `Your exhibitor registration has been cancelled — RailTrans Expo`;
-          const text = `Hello ${name},\n\nYour exhibitor registration (ID: ${updated._id}) has been cancelled.\n\nRegards,\nRailTrans Expo Team`;
-          const html = `<p>Hello ${name},</p><p>Your exhibitor registration (ID: <strong>${updated._id}</strong>) has been cancelled.</p>`;
-          await sendMail({ to, subject, text, html });
+          const mail = buildExhibitorAckEmail({ name });
+          await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
         } catch (e) {
           console.error('[exhibitors] cancel email error:', e && (e.stack || e));
         }

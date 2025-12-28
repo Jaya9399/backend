@@ -1,3 +1,19 @@
+/**
+ * routes/otp.js
+ *
+ * OTP endpoints for registration flows.
+ * - GET  /api/otp/check-email?email=...&type=...
+ * - POST /api/otp/send   { value: <email>, registrationType: <role> }
+ * - POST /api/otp/verify { value: <email>, otp: <code>, registrationType: <role> }
+ *
+ * Behavior:
+ * - Checks backend for existing email (role-aware) and returns 409 on /send when email exists.
+ * - Generates 6-digit OTP, stores in an in-memory Map with TTL (5 minutes) and short resend cooldown.
+ * - Sends OTP email using transporter (SMTP config via env or jsonTransport fallback).
+ *
+ * NOTE: This file assumes a mongoClient util (getDb()/db) and nodemailer installed.
+ */
+
 const express = require("express");
 const nodemailer = require("nodemailer");
 const mongoClient = require("../utils/mongoClient"); // uses getDb() or .db
@@ -58,8 +74,8 @@ function escapeRegex(s = "") {
 }
 
 /* ---------- OTP store & config ---------- */
-const OTP_TTL_MS = 5 * 60 * 1000;
-const RESEND_COOLDOWN_MS = 60 * 1000;
+const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const RESEND_COOLDOWN_MS = 60 * 1000; // 1 minute between sends per key
 const MAX_VERIFY_ATTEMPTS = 5;
 const otpStore = new Map(); // key = `${role}::${email}`
 
@@ -92,13 +108,12 @@ function roleToCollection(role) {
   if (!role) return null;
   return `${role}s`; // e.g. visitor -> visitors
 }
-const KNOWN_COLLECTIONS = ["visitors","exhibitors","partners","speakers","awardees"];
+const KNOWN_COLLECTIONS = ["visitors", "exhibitors", "partners", "speakers", "awardees"];
 
 /* ---------- Mongo lookup (updated) ----------
    Behavior:
     - If registrationType (role) provided and valid -> try [roleCollection, "registrants"] only (stop on first match).
     - If no valid role provided -> try ["registrants", ...KNOWN_COLLECTIONS].
-   This avoids checking unrelated collections (e.g. visitors) when role is explicitly given.
 */
 async function findExistingByEmailMongo(emailRaw, registrationType) {
   try {
@@ -111,21 +126,17 @@ async function findExistingByEmailMongo(emailRaw, registrationType) {
     let collectionsToTry = [];
 
     if (role) {
-      // Strict: only check the role-specific collection first, then legacy registrants.
       const roleCol = roleToCollection(role);
       collectionsToTry = [roleCol, "registrants"];
     } else {
-      // No role provided: search registrants then all known collections
       collectionsToTry = ["registrants", ...KNOWN_COLLECTIONS];
     }
 
-    // Remove duplicates just in case
     collectionsToTry = Array.from(new Set(collectionsToTry.filter(Boolean)));
 
     const regex = new RegExp(`^\\s*${escapeRegex(emailNorm)}\\s*$`, "i");
     const candidatePaths = ["email", "data.email", "form.email", "data.emailAddress", "data.contactEmail"];
 
-    // Optional debug: list attempted collections in logs when running in debug mode
     if (process.env.DEBUG_FIND_EMAIL === "true") {
       console.debug(`[otp] findExistingByEmailMongo: trying collections: ${collectionsToTry.join(", ")}`);
     }
@@ -134,7 +145,6 @@ async function findExistingByEmailMongo(emailRaw, registrationType) {
       if (!colName) continue;
       try {
         const coll = db.collection(colName);
-        // Build OR query for candidate paths
         const q = {
           $or: candidatePaths.map(p => {
             const obj = {};
@@ -142,14 +152,12 @@ async function findExistingByEmailMongo(emailRaw, registrationType) {
             return obj;
           })
         };
-        // Narrow 'registrants' by role if role present
         if (colName === "registrants" && role) q.role = role;
 
         const projection = { _id: 1, ticket_code: 1, name: 1, company: 1, mobile: 1, email: 1, data: 1, form: 1, role: 1 };
         const doc = await coll.findOne(q, { projection });
         if (!doc) continue;
 
-        // figure out matched path
         let matchedPath = null;
         let emailValue = null;
         for (const p of candidatePaths) {
@@ -182,7 +190,6 @@ async function findExistingByEmailMongo(emailRaw, registrationType) {
           role: doc.role || role || null,
         };
       } catch (e) {
-        // skip this collection on error and continue to next
         console.warn(`[otp] findExistingByEmailMongo: collection ${colName} check failed:`, e && e.message ? e.message : e);
         continue;
       }
@@ -233,16 +240,74 @@ router.post("/send", express.json({ limit: "2mb" }), async (req, res) => {
       });
     }
 
-    // generate OTP and store
-    const otp = genOtp();
+    // enforce resend cooldown
     const key = `${regType}::${emailNorm}`;
     const now = Date.now();
+    const prev = otpStore.get(key);
+    if (prev && prev.cooldownUntil && prev.cooldownUntil > now) {
+      const wait = Math.ceil((prev.cooldownUntil - now) / 1000);
+      return res.status(429).json({ success: false, error: `Please wait ${wait}s before requesting another OTP` });
+    }
+
+    // generate OTP and store
+    const otp = genOtp();
     otpStore.set(key, { otp, expires: now + OTP_TTL_MS, attempts: 0, lastSentAt: now, cooldownUntil: now + RESEND_COOLDOWN_MS });
 
+    // build email template (text + html) per user's requested content
+    const subject = "RailTrans Expo — One-Time Password (OTP)";
+    const text = [
+      "Dear User,",
+      "",
+      "Greetings from RailTrans Expo Support.",
+      "",
+      "To proceed with your request, please use the following One-Time Password (OTP) for verification:",
+      "",
+      `OTP: ${otp}`,
+      "",
+      "This OTP is valid for 5 minutes only.",
+      "For security reasons, please do not share this OTP with anyone.",
+      "",
+      "If you did not initiate this request or need any assistance, please contact us immediately at support@railtransexpo.com.",
+      "",
+      "Thank you for choosing RailTrans Expo.",
+      "",
+      "Warm regards,",
+      "RailTrans Expo Support Team",
+      "Urban Infra Group",
+      "support@railtransexpo.com",
+      "https://www.railtransexpo.com"
+    ].join("\n");
+
+    const html = `<!doctype html>
+<html>
+  <body style="font-family:Arial,Helvetica,sans-serif;color:#111;">
+    <p>Dear User,</p>
+
+    <p>Greetings from <strong>RailTrans Expo Support</strong>.</p>
+
+    <p>To proceed with your request, please use the following One-Time Password (OTP) for verification:</p>
+
+    <h2 style="letter-spacing:2px;">OTP: <span style="color:#c8102e;">${otp}</span></h2>
+
+    <p><strong>This OTP is valid for 5 minutes only.</strong><br/>
+    For security reasons, please do not share this OTP with anyone.</p>
+
+    <p>If you did not initiate this request or need any assistance, please contact us immediately at <a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a>.</p>
+
+    <p>Thank you for choosing RailTrans Expo.</p>
+
+    <p>Warm regards,<br/>
+    RailTrans Expo Support Team<br/>
+    Urban Infra Group<br/>
+    📧 <a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a><br/>
+    🌐 <a href="https://www.railtransexpo.com" target="_blank" rel="noopener noreferrer">www.railtransexpo.com</a></p>
+  </body>
+</html>`;
+
     // send email (may be jsonTransport in dev)
-    const from = process.env.MAIL_FROM || process.env.SMTP_USER || "no-reply@example.com";
+    const from = process.env.MAIL_FROM || process.env.SMTP_USER || "no-reply@railtransexpo.com";
     try {
-      await transporter.sendMail({ from, to: value, subject: "Your RailTrans Expo OTP", text: `Your OTP is ${otp}. It expires in 5 minutes.`, html: `<p>Your OTP is <b>${otp}</b>. It expires in 5 minutes.</p>` });
+      await transporter.sendMail({ from, to: value, subject, text, html });
     } catch (mailErr) {
       console.error("[otp/send] mail send failed:", mailErr && (mailErr.stack || mailErr.message || mailErr));
       otpStore.delete(key);
