@@ -296,6 +296,45 @@ router.post("/", async (req, res) => {
   }
 });
 
+// DELETE /api/visitors/:idOrCode
+router.delete("/:id", async (req, res) => {
+  try {
+    const db = await obtainDb();
+    if (!db) {
+      return res.status(500).json({ success: false, message: "Database not available" });
+    }
+
+    const coll = db.collection("visitors");
+    const idParam = String(req.params.id || "").trim();
+    if (!idParam) {
+      return res.status(400).json({ success: false, message: "Missing identifier" });
+    }
+
+    // Try delete by Mongo ObjectId first
+    let result = null;
+    if (ObjectId.isValid(idParam)) {
+      result = await coll.deleteOne({ _id: new ObjectId(idParam) });
+    }
+
+    // Fallback: delete by ticket_code
+    if (!result || result.deletedCount === 0) {
+      result = await coll.deleteOne({ ticket_code: idParam });
+    }
+
+    if (!result || result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "Visitor not found" });
+    }
+
+    return res.json({ success: true, message: "Visitor deleted successfully" });
+  } catch (err) {
+    console.error("[visitors] DELETE error", err);
+    return res.status(500).json({
+      success: false,
+      message: "Delete failed",
+      error: err.message,
+    });
+  }
+});
 
 
 module.exports = router;
