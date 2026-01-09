@@ -90,93 +90,46 @@ async function loadAdminFields(db, pageName = 'awardee') {
   }
 }
 
-/* Try to require server-side buildTicketEmail if present */
-let serverBuildTicketEmail = null;
-try {
-  const tmpl = require('../utils/emailTemplate');
-  if (tmpl && typeof tmpl.buildTicketEmail === 'function') serverBuildTicketEmail = tmpl.buildTicketEmail;
-} catch (e) {
-  serverBuildTicketEmail = null;
-}
+/* ---------- Simple awardee email builder (mirrors exhibitors style) ---------- */
+function buildAwardeeAckEmail({ name = '', ticket_code = '' } = {}) {
+  const subject = 'RailTrans Expo Registration Confirmed';
+  const text = `Hello ${name || 'Participant'},
 
-/* Minimal server-side email builder fallback */
-function buildSimpleAwardeeEmail({ frontendBase = '', id = '', name = '', ticket_code = '' } = {}) {
-  const fb = String(frontendBase || process.env.FRONTEND_BASE || '').replace(/\/$/, '');
-  const downloadUrl = fb
-    ? `${fb}/ticket-download?entity=${encodeURIComponent('awardees')}&${id ? `id=${encodeURIComponent(String(id))}` : `ticket_code=${encodeURIComponent(String(ticket_code || ''))}`}`
-    : 'ticket_download_unavailable';
+Thank you for registering for RailTrans Expo.
 
-  const subject = `RailTrans Expo — Your registration`;
-  const text = [
-    `Hello ${name || 'Participant'},`,
-    '',
-    `Thank you for registering for RailTrans Expo.`,
-    ticket_code ? `Your code: ${ticket_code}` : '',
-    `Download your e-badge: ${downloadUrl}`,
-    '',
-    'Regards,',
-    'RailTrans Expo Team',
-  ].filter(Boolean).join('\n');
+Your registration has been received successfully.
+Your ticket code is: ${ticket_code}
 
-  const html = `<p>Hello ${name || 'Participant'},</p>
-<p>Thank you for registering for RailTrans Expo.</p>
-${ticket_code ? `<p><strong>Your code:</strong> ${ticket_code}</p>` : ''}
-<p><a href="${downloadUrl}" target="_blank" rel="noopener noreferrer">Download your e-badge</a></p>
-<p>Regards,<br/>RailTrans Expo Team</p>`;
+Our team looks forward to welcoming you.
 
-  return { subject, text, html };
-}
+Regards,
+RailTrans Expo Team
+support@railtransexpo.com
+`;
 
-/* ---------- mail helper used by routes ---------- */
-async function sendMailForAwardee({ email, model, pdfBase64 = null }) {
-  if (!email) return { ok: false, error: 'no-recipient' };
-  const frontendBase = process.env.FRONTEND_BASE || '';
-  if (serverBuildTicketEmail) {
-    try {
-      const tpl = await serverBuildTicketEmail({ ...(model || {}), frontendBase });
-      const attachments = Array.isArray(tpl.attachments) ? tpl.attachments.filter(a => {
-        const ct = String(a.contentType || a.content_type || '').toLowerCase();
-        if (ct && ct.startsWith('image/')) return false;
-        const fn = String(a.filename || a.name || '').toLowerCase();
-        if (fn && (fn.endsWith('.png') || fn.endsWith('.jpg') || fn.endsWith('.jpeg') || fn.endsWith('.gif') || fn.endsWith('.svg') || fn.endsWith('.webp'))) return false;
-        return true;
-      }).map(a => {
-        const out = {};
-        if (a.filename) out.filename = a.filename;
-        if (a.content) out.content = a.content;
-        if (a.encoding) out.encoding = a.encoding;
-        if (a.contentType || a.content_type) out.contentType = a.contentType || a.content_type;
-        if (a.path) out.path = a.path;
-        return out;
-      }) : [];
+  const html = `
+<p>Hello ${name || 'Participant'},</p>
+<p>Thank you for registering for <strong>RailTrans Expo</strong>.</p>
+<p><strong>Your ticket code:</strong> ${ticket_code}</p>
+<p>We look forward to welcoming you.</p>
+<p>Regards,<br/>
+<strong>RailTrans Expo Team</strong><br/>
+<a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a>
+</p>`;
 
-      if (pdfBase64) {
-        attachments.push({ filename: 'Ticket.pdf', content: pdfBase64, encoding: 'base64', contentType: 'application/pdf' });
-      }
-
-      const sendRes = await mailer.sendMail({ to: email, subject: tpl.subject || 'RailTrans Expo', text: tpl.text || '', html: tpl.html || '', attachments });
-      if (sendRes && sendRes.success) return { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
-      return { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
-    } catch (e) {
-      // fallback
-      const minimal = buildSimpleAwardeeEmail({ frontendBase, id: model && model.id, name: model && model.name, ticket_code: model && model.ticket_code });
-      const sendRes = await mailer.sendMail({ to: email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
-      if (sendRes && sendRes.success) return { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
-      return { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
-    }
-  } else {
-    const minimal = buildSimpleAwardeeEmail({ frontendBase, id: model && model.id, name: model && model.name, ticket_code: model && model.ticket_code });
-    const sendRes = await mailer.sendMail({ to: email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
-    if (sendRes && sendRes.success) return { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
-    return { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
-  }
+  return {
+    subject,
+    text,
+    html,
+    from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
+  };
 }
 
 /* ---------- Routes ---------- */
 
 /**
  * POST /api/awardees
- * Create a new awardee, attempt to send confirmation email server-side, and return mail result.
+ * Create a new awardee, respond immediately, send confirmation email in background.
  */
 router.post('/', async (req, res) => {
   try {
@@ -238,15 +191,6 @@ router.post('/', async (req, res) => {
       try { await col.updateOne({ _id: r.insertedId }, { $set: { ticket_code: doc.ticket_code } }); } catch (e) {}
     }
 
-    // attempt to send email server-side (best-effort)
-    let mailResult = null;
-    try {
-      const model = { frontendBase: process.env.FRONTEND_BASE || '', entity: 'awardees', id: insertedId, name: doc.name || '', ticket_code: doc.ticket_code || '', form: doc };
-      mailResult = await sendMailForAwardee({ email: doc.email, model, pdfBase64: null });
-    } catch (e) {
-      mailResult = { ok: false, error: String(e && (e.message || e)) };
-    }
-
     // notify admins (best-effort)
     try {
       const adminEnv = (process.env.AWARDEE_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
@@ -260,13 +204,36 @@ router.post('/', async (req, res) => {
     }
 
     const saved = await col.findOne({ _id: r.insertedId });
-    return res.json(convertBigIntForJson({
+
+    // respond immediately
+    res.json(convertBigIntForJson({
       success: true,
       insertedId,
       ticket_code: doc.ticket_code,
-      saved: docToOutput(saved),
-      mail: mailResult
+      saved: docToOutput(saved)
     }));
+
+    // background email (fire-and-forget)
+    (async () => {
+      try {
+        if (!doc.email) return;
+        const mail = buildAwardeeAckEmail({
+          name: doc.name || doc.organization,
+          ticket_code: doc.ticket_code,
+        });
+        await mailer.sendMail({
+          to: doc.email,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          from: mail.from,
+        });
+        console.log('[awardees] ack mail sent to', doc.email);
+      } catch (e) {
+        console.error('[awardees] ack mail failed:', e && (e.message || e));
+      }
+    })();
+
   } catch (err) {
     console.error('[awardees] POST (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to create awardee' });
@@ -275,9 +242,39 @@ router.post('/', async (req, res) => {
 
 /**
  * POST /api/awardees/:id/resend-email
- * Resend confirmation email for a saved awardee (admin action)
+ * Admin action to resend acknowledgment email.
  */
-/* ---------- Existing remaining routes kept (GET list, GET/:id, stats, confirm, put, upload-proof, delete) ---------- */
+router.post('/:id/resend-email', async (req, res) => {
+  try {
+    const db = await obtainDb();
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
+
+    let oid;
+    try { oid = new ObjectId(req.params.id); } catch { return res.status(400).json({ success: false, error: 'invalid id' }); }
+
+    const doc = await db.collection('awardees').findOne({ _id: oid });
+    if (!doc) return res.status(404).json({ success: false, error: 'Awardee not found' });
+    if (!doc.email) return res.status(400).json({ success: false, error: 'No email found for awardee' });
+
+    const mail = buildAwardeeAckEmail({
+      name: doc.name || doc.organization,
+      ticket_code: doc.ticket_code,
+    });
+
+    await mailer.sendMail({
+      to: doc.email,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+      from: mail.from,
+    });
+
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[awardees] resend error:', e && (e.stack || e));
+    return res.status(500).json({ success: false, error: 'Failed to resend email' });
+  }
+});
 
 /**
  * GET /api/awardees
@@ -295,6 +292,65 @@ router.get('/', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/awardees/send-reminders
+ * Admin-triggered bulk reminder email
+ */
+router.post('/send-reminders', async (req, res) => {
+  try {
+    const db = await obtainDb();
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'database not available' });
+    }
+
+    const cursor = db.collection('awardees').find({
+      email: { $exists: true, $ne: "" }
+    });
+
+    let sent = 0;
+    let failed = 0;
+
+    while (await cursor.hasNext()) {
+      const doc = await cursor.next();
+      try {
+        const subject = `Reminder: RailTrans Expo`;
+        const text = `Hello ${doc.name || doc.organization || 'Participant'},
+
+This is a reminder for RailTrans Expo.
+
+Your ticket code: ${doc.ticket_code || 'N/A'}
+
+Regards,
+RailTrans Expo Team`;
+
+        const html = `
+<p>Hello ${doc.name || doc.organization || 'Participant'},</p>
+<p>This is a reminder for <strong>RailTrans Expo</strong>.</p>
+<p><strong>Your ticket code:</strong> ${doc.ticket_code || 'N/A'}</p>
+<p>Regards,<br/>RailTrans Expo Team</p>
+`;
+
+        await mailer.sendMail({
+          to: doc.email,
+          subject,
+          text,
+          html,
+          from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
+        });
+
+        sent++;
+      } catch (e) {
+        failed++;
+        console.error('[awardees] reminder failed for:', doc.email, e && e.message);
+      }
+    }
+
+    return res.json({ success: true, sent, failed });
+  } catch (err) {
+    console.error('[awardees] send-reminders error:', err && (err.stack || err));
+    return res.status(500).json({ success: false, error: 'Failed to send reminders' });
+  }
+});
 /**
  * GET /api/awardees/stats
  */
@@ -332,13 +388,10 @@ router.get('/:id', async (req, res) => {
 });
 
 /**
- * POST /api/awardees/:id/confirm, PUT, upload-proof, DELETE
- * (Keeping your existing implementations — copy as needed from your prior file)
+ * POST /api/awardees/:id/confirm
  */
 router.post('/:id/confirm', express.json(), async (req, res) => {
-  // implementation as in your previous file - kept for brevity
   try {
-    // re-use code from original route: validate, whitelist, promote admin fields, update, return updated doc
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
