@@ -7,12 +7,50 @@ const mailer = require('../utils/mailer'); // expects sendMail(opts) -> { succes
 // parse JSON bodies for routes in this router
 router.use(express.json({ limit: '6mb' }));
 
+function buildSpeakerAckEmail({ name = '', ticket_code = '' } = {}) {
+  const subject = 'RailTrans Expo — Speaker Registration Confirmed';
+
+  const text = `Hello ${name || 'Speaker'},
+
+Thank you for registering as a Speaker at RailTrans Expo.
+
+Your registration code is: ${ticket_code}
+
+Our team will reach out with session details soon.
+
+Regards,
+RailTrans Expo Team
+support@railtransexpo.com
+`;
+
+  const html = `
+<p>Hello ${name || 'Speaker'},</p>
+<p>Thank you for registering as a <strong>Speaker</strong> at <strong>RailTrans Expo</strong>.</p>
+<p><strong>Your registration code:</strong> ${ticket_code}</p>
+<p>Our team will contact you shortly with session details.</p>
+<p>Regards,<br/>
+<strong>RailTrans Expo Team</strong><br/>
+<a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a>
+</p>`;
+
+  return {
+    subject,
+    text,
+    html,
+    from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
+  };
+}
+
 /* ---------- helpers ---------- */
 async function obtainDb() {
   if (!mongo) return null;
   if (typeof mongo.getDb === 'function') return await mongo.getDb();
   if (mongo.db) return mongo.db;
   return null;
+}
+
+function isEmailLike(v) {
+  return typeof v === 'string' && /\S+@\S+\.\S+/.test(v);
 }
 
 function toIsoMysqlLike(val) {
@@ -43,53 +81,18 @@ function generateTicketCode() {
   return String(Math.floor(10000 + Math.random() * 90000));
 }
 
-/* Try to require server-side buildTicketEmail if present (your frontend template supports Node) */
-let serverBuildTicketEmail = null;
-try {
-  const tmpl = require('../utils/emailTemplate');
-  if (tmpl && typeof tmpl.buildTicketEmail === 'function') serverBuildTicketEmail = tmpl.buildTicketEmail;
-} catch (e) {
-  serverBuildTicketEmail = null;
-}
-
-/* Minimal server-side email builder fallback for speakers */
-function buildSimpleSpeakerEmail({ frontendBase = '', id = '', name = '', ticket_code = '' } = {}) {
-  const fb = String(frontendBase || process.env.FRONTEND_BASE || '').replace(/\/$/, '');
-  const downloadUrl = fb
-    ? `${fb}/ticket-download?entity=${encodeURIComponent('speakers')}&${id ? `id=${encodeURIComponent(String(id))}` : `ticket_code=${encodeURIComponent(String(ticket_code || ''))}`}`
-    : 'ticket_download_unavailable';
-
-  const subject = `RailTrans Expo — Thank you for registering as a Speaker`;
-  const text = [
-    `Hello ${name || 'Speaker'},`,
-    '',
-    `Thank you for registering for RailTrans Expo.`,
-    ticket_code ? `Your registration code: ${ticket_code}` : '',
-    `Download your e-badge: ${downloadUrl}`,
-    '',
-    'Regards,',
-    'RailTrans Expo Team',
-  ].filter(Boolean).join('\n');
-
-  const html = `<p>Hello ${name || 'Speaker'},</p>
-<p>Thank you for registering for RailTrans Expo.</p>
-${ticket_code ? `<p><strong>Your registration code:</strong> ${ticket_code}</p>` : ''}
-<p><a href="${downloadUrl}" target="_blank" rel="noopener noreferrer">Download your e-badge</a></p>
-<p>Regards,<br/>RailTrans Expo Team</p>`;
-
-  return { subject, text, html };
-}
-
 /* ---------- Routes ---------- */
 
 /**
  * POST /api/speakers
- * Create new speaker and attempt to send confirmation email server-side.
- * Response includes { success, insertedId, ticket_code, saved, mail }
+ * Create new speaker and respond immediately. Send confirmation email in background.
  */
 router.post('/', async (req, res) => {
+  let db;
+  let col;
+  let r;
   try {
-    const db = await obtainDb();
+    db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
     const payload = { ...(req.body || {}) };
@@ -106,24 +109,25 @@ router.post('/', async (req, res) => {
       mobile: payload.mobile || payload.phone || '',
       designation: payload.designation || '',
       company: payload.company || '',
-      ticket_category: payload.ticket_category || payload.ticketCategory || '',
+      // normalize ticket_category for analytics consistency
+      ticket_category: 'speaker',
       slots: Array.isArray(payload.slots) ? payload.slots : [],
       category: payload.category || '',
       txId: payload.txId || payload.txid || null,
       other_details: payload.other_details || payload.otherDetails || '',
       created_at: new Date(),
       registered_at: payload.registered_at ? new Date(payload.registered_at) : new Date(),
-      // preserve admin flag if present
+      // preserve admin flag if present; store admin_created_at as Date when applicable
       added_by_admin: !!payload.added_by_admin,
-      admin_created_at: payload.added_by_admin ? (payload.admin_created_at || new Date().toISOString()) : undefined,
+      admin_created_at: payload.added_by_admin ? new Date(payload.admin_created_at || Date.now()) : undefined,
     };
 
     // ticket_code: allow incoming, else generate
     doc.ticket_code = payload.ticket_code || payload.ticketCode || generateTicketCode();
 
     // Insert document
-    const col = db.collection('speakers');
-    const r = await col.insertOne(doc);
+    col = db.collection('speakers');
+    r = await col.insertOne(doc);
     const insertedId = r.insertedId ? String(r.insertedId) : null;
 
     // ensure ticket_code persisted
@@ -132,65 +136,50 @@ router.post('/', async (req, res) => {
     }
 
     // prepare response object
-    const saved = await col.findOne({ _id: r.insertedId });
-    const output = docToOutput(saved);
+    const savedDoc = await col.findOne({ _id: r.insertedId });
+    const output = docToOutput(savedDoc);
 
-    // Attempt to send confirmation email server-side (best-effort)
-    let mailResult = null;
-    try {
-      const frontendBase = process.env.FRONTEND_BASE || '';
-      if (serverBuildTicketEmail) {
-        // server-side HTML template available — use it
-        try {
-          const model = {
-            frontendBase,
-            entity: 'speakers',
-            id: insertedId,
-            name: doc.name || '',
-            company: doc.company || '',
-            ticket_category: doc.ticket_category || '',
-            badgePreviewUrl: '',
-            downloadUrl: '',
-            logoUrl: '',
-            form: doc || {},
-            pdfBase64: null,
-          };
-          const tpl = await serverBuildTicketEmail(model);
-          const sendRes = await mailer.sendMail({
-            to: doc.email,
-            subject: tpl.subject || 'RailTrans Expo — Registration',
-            text: tpl.text || '',
-            html: tpl.html || '',
-            attachments: tpl.attachments || [],
-          });
-          if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
-          else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
-        } catch (e) {
-          // fallback to simple email if template build or send fails
-          const minimal = buildSimpleSpeakerEmail({ frontendBase, id: insertedId, name: doc.name || '', ticket_code: doc.ticket_code || '' });
-          const sendRes = await mailer.sendMail({ to: doc.email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
-          if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
-          else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
-        }
-      } else {
-        // no server template — use simple fallback
-        const minimal = buildSimpleSpeakerEmail({ frontendBase, id: insertedId, name: doc.name || '', ticket_code: doc.ticket_code || '' });
-        const sendRes = await mailer.sendMail({ to: doc.email, subject: minimal.subject, text: minimal.text, html: minimal.html, attachments: [] });
-        if (sendRes && sendRes.success) mailResult = { ok: true, info: sendRes.info, dbRecordId: sendRes.dbRecordId };
-        else mailResult = { ok: false, error: sendRes && sendRes.error ? sendRes.error : 'send failed', dbRecordId: sendRes && sendRes.dbRecordId ? sendRes.dbRecordId : null };
-      }
-    } catch (mailErr) {
-      mailResult = { ok: false, error: String(mailErr && (mailErr.message || mailErr)) };
-    }
-
-    // return saved document and mail result
-    return res.json({
+    // respond immediately (do NOT include mail internals)
+    res.json({
       success: true,
       insertedId,
       ticket_code: doc.ticket_code,
       saved: output,
-      mail: mailResult,
     });
+
+    // background: attempt to send confirmation email (fire-and-forget)
+    (async () => {
+      try {
+        if (!isEmailLike(doc.email)) return;
+        const mail = buildSpeakerAckEmail({
+          name: doc.name || '',
+          ticket_code: doc.ticket_code || '',
+        });
+        await mailer.sendMail({
+          to: doc.email,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          from: mail.from,
+        });
+        console.log('[speakers] ack mail sent to', doc.email);
+      } catch (e) {
+        console.error('[speakers] ack mail failed:', e && (e.message || e));
+        try {
+          // mark email failure on the record for ops/debug
+          if (r && r.insertedId) {
+            await col.updateOne(
+              { _id: r.insertedId },
+              { $set: { email_failed: true, email_failed_at: new Date() } }
+            );
+          }
+        } catch (upErr) {
+          // ignore update errors
+        }
+      }
+    })();
+
+    return;
   } catch (err) {
     console.error('POST /api/speakers (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to create speaker' });
@@ -199,10 +188,50 @@ router.post('/', async (req, res) => {
 
 /**
  * POST /api/speakers/:id/resend-email
- * Resend confirmation email for speaker using server template if available
+ * Resend confirmation email for speaker using simple builder.
  */
+router.post('/:id/resend-email', async (req, res) => {
+  try {
+    const db = await obtainDb();
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
-/* ---------- Existing speaker CRUD routes (list, get, confirm, put, delete) ---------- */
+    let oid;
+    try { oid = new ObjectId(req.params.id); } catch { return res.status(400).json({ success: false, error: 'invalid id' }); }
+
+    const col = db.collection('speakers');
+    const doc = await col.findOne({ _id: oid });
+    if (!doc) return res.status(404).json({ success: false, error: 'Speaker not found' });
+    if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: 'No valid email found for speaker' });
+
+    const mail = buildSpeakerAckEmail({
+      name: doc.name || '',
+      ticket_code: doc.ticket_code || '',
+    });
+
+    try {
+      await mailer.sendMail({
+        to: doc.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        from: mail.from,
+      });
+      return res.json({ success: true });
+    } catch (e) {
+      console.error('[speakers] resend failed:', e && (e.message || e));
+      try {
+        await col.updateOne(
+          { _id: oid },
+          { $set: { email_failed: true, email_failed_at: new Date() } }
+        );
+      } catch {}
+      return res.status(500).json({ success: false, error: 'Failed to resend email' });
+    }
+  } catch (err) {
+    console.error('POST /api/speakers/:id/resend-email error:', err && (err.stack || err));
+    return res.status(500).json({ success: false, error: 'Failed to resend email' });
+  }
+});
 
 /**
  * GET /api/speakers
