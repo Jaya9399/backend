@@ -1,4 +1,5 @@
 require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -86,7 +87,7 @@ let exhibitorsRouter = null;
 try { exhibitorsRouter = require('./routes/exhibitors-mongo'); } catch (e) { try { exhibitorsRouter = require('./routes/exhibitors'); } catch (e2) { exhibitorsRouter = null; } }
 
 let exhibitorConfigRouter = null;
-try { exhibitorConfigRouter = require('./routes/exhibitor-config-mongo'); } catch (e) { try { exhibitorConfigRouter = require('./routes/exhibitorConfig'); } catch (e2) { exhibitorConfigRouter = null; } }
+try { exhibitorConfigRouter = require('./routes/exhibitor-config-mongo'); } catch (e) { exhibitorConfigRouter = null; try { exhibitorConfigRouter = require('./routes/exhibitorConfig'); } catch (e2) { exhibitorConfigRouter = exhibitorConfigRouter || null; } }
 
 let partnersRouter = null;
 try { partnersRouter = require('./routes/partners-mongo'); } catch (e) { try { partnersRouter = require('./routes/partners'); } catch (e2) { partnersRouter = null; } }
@@ -165,6 +166,10 @@ const registrationConfigsRouter = (() => {
 let couponsRouter = null;
 try { couponsRouter = require('./routes/coupons'); } catch (e) { couponsRouter = null; if (e) console.warn('No coupons router found at ./routes/coupons.js'); }
 
+// --- ticketDownload router (mount at /api/tickets/download) ---
+let ticketDownload = null;
+try { ticketDownload = require('./routes/ticketDownload'); } catch (e) { ticketDownload = null; if (e) console.warn('No ticketDownload router found at ./routes/ticketDownload.js'); }
+
 // --- Mount routes (always relative paths) ---
 // Visitors
 if (visitorsRouter) app.use('/api/visitors', visitorsRouter); else console.warn('No visitors router found');
@@ -233,12 +238,20 @@ if (remindersRouter) app.use('/api/reminders', remindersRouter);
 if (ticketsScanRouter) app.use('/api/tickets', ticketsScanRouter);
 if (ticketsUpgradeRouter) app.use('/api/tickets', ticketsUpgradeRouter);
 
+// Mount ticketDownload specifically at /api/tickets/download
+if (ticketDownload) {
+  app.use('/api/tickets/download', ticketDownload);
+  console.log('Mounted /api/tickets/download');
+} else {
+  console.warn('No ticketDownload router mounted at /api/tickets/download (routes/ticketDownload.js missing)');
+}
+
 // Mount image/upload routes at /api so frontend calls like /api/upload-asset and /api/upload-file resolve correctly.
 if (imageUploadRouter) app.use('/api', imageUploadRouter); else console.warn('No image upload router found (routes/imageUpload.js missing)');
 
 if (adminRouter) app.use('/api', adminRouter);
 
-// Registration configs router (new centralized configs collection)
+// Registration configs router (new centralized registration field configs)
 if (registrationConfigsRouter) {
   app.use('/api/registration-configs', registrationConfigsRouter);
   console.log('Mounted /api/registration-configs');
@@ -345,6 +358,7 @@ const PORT = process.env.PORT || 3000;
       console.log(' - /api/mailer ->', emailRouter ? 'mounted' : 'fallback/none');
       console.log(' - /api/configs ->', configsRouter ? 'mounted' : 'fallback/none');
       console.log(' - /api/coupons ->', couponsRouter ? 'mounted' : 'fallback/none');
+      console.log(' - /api/tickets/download ->', ticketDownload ? 'mounted' : 'fallback/none');
       if (process.env.REACT_APP_API_BASE_URL) console.log('Front-end API base env:', process.env.REACT_APP_API_BASE_URL);
     });
   } catch (e) {
