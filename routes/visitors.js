@@ -4,22 +4,20 @@ const mongo = require("../utils/mongoClient");
 const { ObjectId } = require("mongodb");
 const mailer = require("../utils/mailer");
 const { buildTicketEmail } = require("../utils/emailTemplate");
-const { generateBadge } = require("../utils/badgeGenerator"); // ✅ REQUIRED
-
-let safeFieldName = null;
-try {
-  safeFieldName = require("../utils/mongoSchemaSync").safeFieldName;
-} catch (_) {}
 
 router.use(express.json({ limit: "6mb" }));
 
 /* ---------------- helpers ---------------- */
 
 async function obtainDb() {
-  if (!mongo) return null;
-  if (typeof mongo.getDb === "function") return await mongo.getDb();
-  if (mongo.db) return mongo.db;
-  return null;
+  try {
+    if (!mongo) return null;
+    if (typeof mongo.getDb === "function") return await mongo.getDb();
+    if (mongo.db) return mongo.db;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function generateTicketCode() {
@@ -43,9 +41,12 @@ function resolveRole(doc = {}) {
  */
 router.get("/", async (req, res) => {
   const db = await obtainDb();
-  if (!db) return res.status(500).json({ success: false });
+  if (!db) {
+    return res.status(500).json({ success: false, error: "DB not ready" });
+  }
 
-  const rows = await db.collection("visitors")
+  const rows = await db
+    .collection("visitors")
     .find({})
     .sort({ createdAt: -1 })
     .toArray();
@@ -55,11 +56,13 @@ router.get("/", async (req, res) => {
 
 /**
  * POST /api/visitors
- * ❌ NO EMAIL HERE
+ * ❌ DO NOT SEND EMAIL HERE
  */
 router.post("/", async (req, res) => {
   const db = await obtainDb();
-  if (!db) return res.status(500).json({ success: false });
+  if (!db) {
+    return res.status(500).json({ success: false, error: "DB not ready" });
+  }
 
   const body = req.body || {};
   const form = body.form || body || {};
@@ -80,6 +83,7 @@ router.post("/", async (req, res) => {
     data: form,
     createdAt: new Date(),
     updatedAt: new Date(),
+    added_by_admin: !!body.added_by_admin,
   };
 
   const r = await db.collection("visitors").insertOne(doc);
@@ -88,17 +92,19 @@ router.post("/", async (req, res) => {
     success: true,
     insertedId: r.insertedId,
     ticket_code,
-    mail: { skipped: true }, // 🔴 IMPORTANT
+    mail: { skipped: true },
   });
 });
 
 /**
  * POST /api/visitors/:id/resend-email
- * ✅ BADGE + EMAIL
+ * ✅ EMAIL + BADGE
  */
 router.post("/:id/resend-email", async (req, res) => {
   const db = await obtainDb();
-  if (!db) return res.status(500).json({ success: false });
+  if (!db) {
+    return res.status(500).json({ success: false, error: "DB not ready" });
+  }
 
   let oid;
   try {
@@ -109,16 +115,20 @@ router.post("/:id/resend-email", async (req, res) => {
 
   const coll = db.collection("visitors");
   const doc = await coll.findOne({ _id: oid });
-  if (!doc) return res.status(404).json({ success: false });
+  if (!doc) {
+    return res.status(404).json({ success: false, error: "Visitor not found" });
+  }
 
   if (!isEmailLike(doc.email)) {
     return res.status(400).json({ success: false, error: "Invalid email" });
   }
 
-  /* -------- BADGE (FAIL-SOFT) -------- */
+  /* -------- BADGE (LAZY + SAFE) -------- */
   let badgeDataUri = "";
 
   try {
+    const { generateBadge } = require("../utils/badgeGenerator");
+
     const badge = await generateBadge({
       name: doc.name || "Attendee",
       company: doc.data?.company || "",
@@ -131,7 +141,7 @@ router.post("/:id/resend-email", async (req, res) => {
       badgeDataUri = `data:image/png;base64,${badge.pngBase64}`;
     }
   } catch (err) {
-    console.error("[badge] generation failed, continuing", err);
+    console.warn("[badge] skipped:", err.message || err);
   }
 
   /* -------- EMAIL TEMPLATE -------- */
@@ -146,7 +156,6 @@ router.post("/:id/resend-email", async (req, res) => {
     ticket_category: doc.ticket_category || "",
     badgePreviewUrl: badgeDataUri,
     downloadUrl: `${frontendBase}/ticket-download?entity=visitors&id=${doc._id}`,
-    upgradeUrl: `${frontendBase}/ticket-upgrade?entity=visitors&id=${doc._id}`,
     form: doc.data || {},
     ticket_code: doc.ticket_code,
   });
@@ -160,7 +169,7 @@ router.post("/:id/resend-email", async (req, res) => {
     attachments: tpl.attachments || [],
   });
 
-  if (sendRes.success) {
+  if (sendRes?.success) {
     await coll.updateOne(
       { _id: oid },
       { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } }
@@ -173,7 +182,7 @@ router.post("/:id/resend-email", async (req, res) => {
     { $set: { email_failed: true, email_failed_at: new Date() } }
   );
 
-  res.status(500).json({ success: false, error: sendRes.error });
+  res.status(500).json({ success: false, error: sendRes?.error || "Mail failed" });
 });
 
 /**
@@ -181,20 +190,24 @@ router.post("/:id/resend-email", async (req, res) => {
  */
 router.delete("/:id", async (req, res) => {
   const db = await obtainDb();
-  if (!db) return res.status(500).json({ success: false });
+  if (!db) {
+    return res.status(500).json({ success: false, error: "DB not ready" });
+  }
 
   const coll = db.collection("visitors");
   const id = req.params.id;
 
   let result = null;
+
   if (ObjectId.isValid(id)) {
     result = await coll.deleteOne({ _id: new ObjectId(id) });
   }
+
   if (!result || result.deletedCount === 0) {
     result = await coll.deleteOne({ ticket_code: id });
   }
 
-  if (!result.deletedCount) {
+  if (!result?.deletedCount) {
     return res.status(404).json({ success: false });
   }
 
