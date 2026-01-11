@@ -48,8 +48,8 @@ function docToOutput(doc) {
   if (!doc) return null;
   const out = { ...(doc || {}) };
   if (out._id) {
+    // Keep original _id (raw) but also expose string id for convenience
     out.id = String(out._id);
-    delete out._id;
   }
   return out;
 }
@@ -130,6 +130,7 @@ support@railtransexpo.com
 /**
  * POST /api/awardees
  * Create a new awardee, respond immediately, send confirmation email in background.
+ * If created with added_by_admin === true, persist flag, set admin_created_at and SKIP emails/notify.
  */
 router.post('/', async (req, res) => {
   try {
@@ -163,6 +164,12 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, error: 'name or organization required' });
     }
 
+    // Respect admin flags if provided
+    const addedByAdmin = !!body.added_by_admin;
+    const adminCreatedAt = body.admin_created_at ? new Date(body.admin_created_at) : (addedByAdmin ? new Date() : undefined);
+
+    const ticket_code = body.ticket_code || generateTicketCode();
+
     const doc = {
       name: name || null,
       mobile: mobile || null,
@@ -172,7 +179,7 @@ router.post('/', async (req, res) => {
       awardType: awardType || null,
       awardOther: awardOther || null,
       bio: bio || null,
-      ticket_code: generateTicketCode(),
+      ticket_code,
       ticket_category: body.ticket_category || body.ticketCategory || null,
       txId: body.txId || body.txid || null,
       created_at: new Date(),
@@ -180,7 +187,12 @@ router.post('/', async (req, res) => {
       proof_path: null,
       status: 'pending',
       updated_at: new Date(),
+      added_by_admin: addedByAdmin,
     };
+
+    if (addedByAdmin) {
+      doc.admin_created_at = adminCreatedAt;
+    }
 
     const col = db.collection('awardees');
     const r = await col.insertOne(doc);
@@ -191,26 +203,45 @@ router.post('/', async (req, res) => {
       try { await col.updateOne({ _id: r.insertedId }, { $set: { ticket_code: doc.ticket_code } }); } catch (e) {}
     }
 
-    // notify admins (best-effort)
-    try {
-      const adminEnv = (process.env.AWARDEE_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
-      const admins = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-      const adminSubject = `New awardee registration — ID: ${insertedId || ''}`;
-      const adminText = `New awardee:\n${JSON.stringify(doc, null, 2)}`;
-      const adminHtml = `<pre>${JSON.stringify(doc, null, 2)}</pre>`;
-      await Promise.all(admins.map(addr => mailer.sendMail({ to: addr, subject: adminSubject, text: adminText, html: adminHtml }).catch(err => console.error('[awardees] admin notify error:', addr, err && (err.message || err)))));
-    } catch (e) {
-      /* ignore */
+    // notify admins (only for non-admin-created records)
+    if (!addedByAdmin) {
+      try {
+        const adminEnv = (process.env.AWARDEE_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
+        const admins = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
+        if (admins.length) {
+          const adminSubject = `New awardee registration — ID: ${insertedId || ''}`;
+          const adminText = `New awardee:\n${JSON.stringify(doc, null, 2)}`;
+          const adminHtml = `<pre>${JSON.stringify(doc, null, 2)}</pre>`;
+          await Promise.all(admins.map(addr => mailer.sendMail({ to: addr, subject: adminSubject, text: adminText, html: adminHtml }).catch(err => console.error('[awardees] admin notify error:', addr, err && (err.message || err)))));
+        } else {
+          console.debug('[awardees] no admin emails configured');
+        }
+      } catch (e) {
+        console.error('[awardees] admin notify error (non-fatal):', e && (e.stack || e));
+      }
     }
 
     const saved = await col.findOne({ _id: r.insertedId });
 
     // respond immediately
-    res.json(convertBigIntForJson({
+    if (addedByAdmin) {
+      // created by admin: persist flag and skip mail
+      return res.status(201).json(convertBigIntForJson({
+        success: true,
+        insertedId,
+        ticket_code: doc.ticket_code,
+        saved: docToOutput(saved),
+        mail: { skipped: true }
+      }));
+    }
+
+    // non-admin: queue/send in background; indicate queued in response
+    res.status(201).json(convertBigIntForJson({
       success: true,
       insertedId,
       ticket_code: doc.ticket_code,
-      saved: docToOutput(saved)
+      saved: docToOutput(saved),
+      mail: { queued: true }
     }));
 
     // background email (fire-and-forget)
@@ -221,19 +252,26 @@ router.post('/', async (req, res) => {
           name: doc.name || doc.organization,
           ticket_code: doc.ticket_code,
         });
-        await mailer.sendMail({
-          to: doc.email,
-          subject: mail.subject,
-          text: mail.text,
-          html: mail.html,
-          from: mail.from,
-        });
-        console.log('[awardees] ack mail sent to', doc.email);
+        try {
+          await mailer.sendMail({
+            to: doc.email,
+            subject: mail.subject,
+            text: mail.text,
+            html: mail.html,
+            from: mail.from,
+          });
+          console.log('[awardees] ack mail sent to', doc.email);
+          try { await col.updateOne({ _id: r.insertedId }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } }); } catch {}
+        } catch (e) {
+          console.error('[awardees] ack mail failed:', e && (e.message || e));
+          try { await col.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } }); } catch {}
+        }
       } catch (e) {
-        console.error('[awardees] ack mail failed:', e && (e.message || e));
+        console.error('[awardees] background mail error:', e && (e.stack || e));
       }
     })();
 
+    return;
   } catch (err) {
     console.error('[awardees] POST (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to create awardee' });
@@ -242,7 +280,6 @@ router.post('/', async (req, res) => {
 
 /**
  * POST /api/awardees/:id/resend-email
- * Admin action to resend acknowledgment email.
  */
 router.post('/:id/resend-email', async (req, res) => {
   try {
@@ -261,15 +298,20 @@ router.post('/:id/resend-email', async (req, res) => {
       ticket_code: doc.ticket_code,
     });
 
-    await mailer.sendMail({
-      to: doc.email,
-      subject: mail.subject,
-      text: mail.text,
-      html: mail.html,
-      from: mail.from,
-    });
-
-    return res.json({ success: true });
+    try {
+      await mailer.sendMail({
+        to: doc.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        from: mail.from,
+      });
+      return res.json({ success: true });
+    } catch (e) {
+      console.error('[awardees] resend error:', e && (e.message || e));
+      try { await db.collection('awardees').updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }); } catch {}
+      return res.status(500).json({ success: false, error: 'Failed to resend email' });
+    }
   } catch (e) {
     console.error('[awardees] resend error:', e && (e.stack || e));
     return res.status(500).json({ success: false, error: 'Failed to resend email' });
@@ -294,14 +336,11 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /api/awardees/send-reminders
- * Admin-triggered bulk reminder email
  */
 router.post('/send-reminders', async (req, res) => {
   try {
     const db = await obtainDb();
-    if (!db) {
-      return res.status(500).json({ success: false, error: 'database not available' });
-    }
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });;
 
     const cursor = db.collection('awardees').find({
       email: { $exists: true, $ne: "" }
@@ -351,6 +390,7 @@ RailTrans Expo Team`;
     return res.status(500).json({ success: false, error: 'Failed to send reminders' });
   }
 });
+
 /**
  * GET /api/awardees/stats
  */
@@ -389,6 +429,7 @@ router.get('/:id', async (req, res) => {
 
 /**
  * POST /api/awardees/:id/confirm
+ * (keeps existing confirm flow)
  */
 router.post('/:id/confirm', express.json(), async (req, res) => {
   try {
@@ -448,6 +489,10 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
   }
 });
 
+/**
+ * PUT /api/awardees/:id
+ * Accepts fields in body (except id/_id), updates and returns saved document.
+ */
 router.put('/:id', express.json(), async (req, res) => {
   try {
     let oid;
@@ -457,6 +502,7 @@ router.put('/:id', express.json(), async (req, res) => {
 
     const data = { ...(req.body || {}) };
     delete data.id;
+    delete data._id;
     delete data.title;
 
     const allowedBase = new Set(['name','email','mobile','designation','organization','awardType','awardOther','bio','ticket_category','ticket_code','txId','registered_at','created_at','status','proof_path']);
@@ -497,7 +543,8 @@ router.put('/:id', express.json(), async (req, res) => {
     const r = await db.collection('awardees').updateOne({ _id: oid }, { $set: updateData });
     if (!r.matchedCount) return res.status(404).json({ success: false, error: 'Awardee not found' });
 
-    return res.json({ success: true });
+    const saved = await db.collection('awardees').findOne({ _id: oid });
+    return res.json({ success: true, saved: docToOutput(saved) });
   } catch (err) {
     console.error('[awardees] PUT (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to update awardee', details: err && err.message });

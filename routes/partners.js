@@ -71,7 +71,6 @@ function docToOutput(doc) {
   const out = { ...(doc || {}) };
   if (out._id) {
     out.id = String(out._id);
-    delete out._id;
   }
   return out;
 }
@@ -88,14 +87,14 @@ function convertBigIntForJson(value) {
   return value;
 }
 
+/* ---------------- routes ---------------- */
+
 /**
  * POST /api/partners/step
- * Snapshot intermediate steps from frontend (non-blocking)
  */
 router.post('/step', async (req, res) => {
   try {
     console.debug('[partners] step snapshot:', req.body);
-    // Optional: persist step snapshots if desired, e.g. to a `steps` collection.
     return res.json({ success: true });
   } catch (err) {
     console.error('[partners] step error:', err && (err.stack || err));
@@ -126,12 +125,10 @@ router.post('/', async (req, res) => {
       return undefined;
     };
 
-    // Fix: do not reuse 'title' for surname — keep surname separate
     const surname = String(pick(['surname']) || '').trim();
     const name = String(pick(['name','fullName','full_name','firstName','first_name']) || '').trim();
     const mobile = String(pick(['mobile','phone','contact','whatsapp']) || '').trim();
     const email = String(pick(['email','mail','emailId','email_id','contactEmail']) || '').trim();
-    // designation may be 'designation' or 'role' or 'title'
     const designation = String(pick(['designation','role','title']) || '').trim();
     const company = String(pick(['companyName','company','organization','org']) || '').trim();
     const businessType = String(pick(['businessType','business_type','companyType']) || '').trim();
@@ -155,93 +152,59 @@ router.post('/', async (req, res) => {
       partnership: partnership || null,
       terms: !!terms,
       status: 'pending',
+      added_by_admin: !!body.added_by_admin,
       created_at: new Date(),
       updated_at: new Date(),
     };
+
+    if (doc.added_by_admin) {
+      doc.admin_created_at = body.admin_created_at ? new Date(body.admin_created_at) : new Date();
+    }
 
     const col = db.collection('partners');
     const r = await col.insertOne(doc);
     const insertedId = r && r.insertedId ? String(r.insertedId) : null;
 
-    // Respond immediately with a JSON-safe payload
-    res.json(convertBigIntForJson({ success: true, insertedId }));
+    if (doc.added_by_admin) {
+      return res.status(201).json(convertBigIntForJson({ success: true, insertedId, id: insertedId, mail: { skipped: true } }));
+    }
 
-    // Background: acknowledgement email (best-effort) - uses canonical builder
+    res.status(201).json(convertBigIntForJson({ success: true, insertedId, id: insertedId, mail: { queued: true } }));
+
     (async () => {
       try {
-        if (!isEmailLike(email)) {
-          console.warn('[partners] partner saved but no valid email present; skipping ack mail');
-          return;
-        }
-        const mail = buildPartnerAckEmail({ name, company });
-        const sendRes = await sendMail({ to: email, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
-        console.debug('[partners] ack email sent to', email, 'result:', sendRes && sendRes.success ? 'ok' : sendRes);
+        if (!insertedId) return;
+        const saved = await col.findOne({ _id: r.insertedId });
+        const to = (saved && saved.email) || null;
 
-        // Clear email_failed if send succeeded
-        if (r && r.insertedId && sendRes && sendRes.success) {
+        if (to && isEmailLike(to)) {
+          const mail = buildPartnerAckEmail({ name: saved.name || '', company: saved.company || '' });
           try {
-            await col.updateOne(
-              { _id: r.insertedId },
-              { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } }
-            );
-          } catch (upErr) { /* ignore */ }
-        } else if (r && r.insertedId && !(sendRes && sendRes.success)) {
-          try {
-            await col.updateOne(
-              { _id: r.insertedId },
-              { $set: { email_failed: true, email_failed_at: new Date() } }
-            );
-          } catch (upErr) { /* ignore */ }
-        }
-      } catch (mailErr) {
-        console.error('[partners] partner ack email error:', mailErr && (mailErr.stack || mailErr));
-        try {
-          if (r && r.insertedId) {
-            await col.updateOne(
-              { _id: r.insertedId },
-              { $set: { email_failed: true, email_failed_at: new Date() } }
-            );
+            await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
+            console.debug('[partners] ack email sent to', to);
+            await col.updateOne({ _id: r.insertedId }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
+          } catch (e) {
+            console.error('[partners] ack email failed:', e && (e.message || e));
+            await col.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
           }
-        } catch (upErr) {
-          // ignore update errors
+        } else {
+          console.warn('[partners] partner saved but no valid email; skipping ack mail');
         }
-      }
-    })();
 
-    // Background: notify admins (best-effort)
-    (async () => {
-      try {
         const adminEnv = (process.env.PARTNER_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
         const adminAddrs = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-        if (!adminAddrs.length) {
-          console.debug('[partners] no admin emails configured (PARTNER_ADMIN_EMAILS / ADMIN_EMAILS)');
-          return;
+        if (adminAddrs.length) {
+          const subject = `New partner registration — ID: ${insertedId}`;
+          const html = `<p>New partner registered.</p><pre>${JSON.stringify(saved || body, null, 2)}</pre>`;
+          const text = `New partner\n${JSON.stringify(saved || body, null, 2)}`;
+          await Promise.all(adminAddrs.map(async (a) => {
+            try { await sendMail({ to: a, subject, text, html }); } catch (e) { console.error('[partners] admin notify error to', a, e && (e.message || e)); }
+          }));
+        } else {
+          console.debug('[partners] no admin emails configured');
         }
-        const subject = `New partner registration — ID: ${insertedId || 'n/a'}`;
-        const html = `<p>A new partner has registered.</p>
-          <ul>
-            <li><b>ID:</b> ${insertedId || ''}</li>
-            <li><b>Name:</b> ${name || ''}</li>
-            <li><b>Company:</b> ${company || ''}</li>
-            <li><b>Mobile:</b> ${mobile || ''}</li>
-            <li><b>Email:</b> ${email || ''}</li>
-          </ul>`;
-        const text = `New partner registration
-ID: ${insertedId || ''}
-Name: ${name || ''}
-Company: ${company || ''}
-Mobile: ${mobile || ''}
-Email: ${email || ''}`;
-
-        await Promise.all(adminAddrs.map(async (a) => {
-          try {
-            await sendMail({ to: a, subject, text, html });
-          } catch (e) {
-            console.error('[mailer] admin notify error', a, e && e.message);
-          }
-        }));
       } catch (bgErr) {
-        console.error('[partners] background admin notify error:', bgErr && (bgErr.stack || bgErr));
+        console.error('[partners] background error:', bgErr && (bgErr.stack || bgErr));
       }
     })();
 
@@ -254,7 +217,6 @@ Email: ${email || ''}`;
 
 /**
  * POST /api/partners/notify
- * Re-send notifications - partnerId or form required
  */
 router.post('/notify', async (req, res) => {
   try {
@@ -280,7 +242,6 @@ router.post('/notify', async (req, res) => {
 
     const resPartnerMail = to && isEmailLike(to) ? await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html }).catch(e => ({ success: false, error: String(e && e.message ? e.message : e) })) : { success: false, error: 'no-recipient-or-invalid-email' };
 
-    // If partner came from DB and notifying succeeded, clear email_failed flags
     if (partner && partner.id && resPartnerMail && resPartnerMail.success) {
       try {
         await db.collection('partners').updateOne({ _id: new ObjectId(partner.id) }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
@@ -350,6 +311,7 @@ router.get('/:id', async (req, res) => {
 
 /**
  * PUT /api/partners/:id
+ * Accepts fields in body (except id/_id), updates, and returns saved document.
  */
 router.put('/:id', async (req, res) => {
   try {
@@ -361,21 +323,18 @@ router.put('/:id', async (req, res) => {
 
     const fields = { ...(req.body || {}) };
     delete fields.id;
+    delete fields._id;
 
-    // convert nested objects to strings only if necessary; Mongo accepts objects natively
-    const updateData = {};
-    for (const [k, v] of Object.entries(fields)) {
-      updateData[k] = v;
-    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ success: false, error: 'No fields to update' });
 
-    if (Object.keys(updateData).length === 0) return res.status(400).json({ success: false, error: 'No fields to update' });
-
-    updateData.updated_at = new Date();
+    const updateData = { ...fields, updated_at: new Date() };
 
     const r = await db.collection('partners').updateOne({ _id: oid }, { $set: updateData });
     if (!r.matchedCount) return res.status(404).json({ success: false, error: 'Partner not found' });
 
-    return res.json({ success: true });
+    const saved = await db.collection('partners').findOne({ _id: oid });
+    const out = docToOutput(saved);
+    return res.json(convertBigIntForJson({ success: true, saved: out }));
   } catch (err) {
     console.error('[partners] update error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to update partner' });
@@ -432,37 +391,22 @@ router.post('/:id/approve', async (req, res) => {
 
     res.json(convertBigIntForJson({ success: true, id, updated: out }));
 
-    // Background email (only if valid email)
+    // Background: notify partner & admins (best-effort)
     if (out && isEmailLike(out.email)) {
       (async () => {
         try {
           const to = out.email;
-          const fullName = out.name || out.company || '';
           const subject = `Your partner request has been approved — RailTrans Expo`;
-          const text = `Hello ${fullName || ''},
+          const text = `Hello ${out.name || out.company || ''},
 
 Good news — your partner registration (ID: ${out.id}) has been approved. Our team will contact you with next steps.
 
 Regards,
 RailTrans Expo Team`;
-          const html = `<p>Hello ${fullName || ''},</p><p>Your partner registration (ID: <strong>${out.id}</strong>) has been <strong>approved</strong>.</p>`;
-          const sendRes = await sendMail({ to, subject, text, html });
-          console.debug('[mailer] Approval email result for partner:', to, sendRes && sendRes.success ? 'ok' : sendRes);
-
-          if (sendRes && sendRes.success) {
-            try {
-              await db.collection('partners').updateOne({ _id: oid }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
-            } catch (upErr) { /* ignore */ }
-          } else {
-            try {
-              await db.collection('partners').updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
-            } catch (upErr) { /* ignore */ }
-          }
+          const html = `<p>Hello ${out.name || out.company || ''},</p><p>Your partner registration (ID: <strong>${out.id}</strong>) has been <strong>approved</strong>.</p>`;
+          await sendMail({ to, subject, text, html });
         } catch (mailErr) {
-          console.error('[mailer] Approval email error for partner:', mailErr && (mailErr.stack || mailErr));
-          try {
-            await db.collection('partners').updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
-          } catch {}
+          console.error('[partners] approval email error:', mailErr && (mailErr.stack || mailErr));
         }
       })();
     }
@@ -501,37 +445,22 @@ router.post('/:id/cancel', async (req, res) => {
 
     res.json(convertBigIntForJson({ success: true, id, updated: out }));
 
-    // Background email (only if valid email)
+    // Background: notify partner & admins (best-effort)
     if (out && isEmailLike(out.email)) {
       (async () => {
         try {
           const to = out.email;
-          const fullName = out.name || out.company || '';
           const subject = `Your partner registration has been cancelled — RailTrans Expo`;
-          const text = `Hello ${fullName || 'there'},
+          const text = `Hello ${out.name || out.company || ''},
 
 Your partner registration (ID: ${out.id}) has been cancelled. If you believe this is an error, contact support@railtransexpo.com.
 
 Regards,
 RailTrans Expo Team`;
-          const html = `<p>Hello ${fullName || 'there'},</p><p>Your partner registration (ID: <strong>${out.id}</strong>) has been <strong>cancelled</strong>.</p>`;
-          const sendRes = await sendMail({ to, subject, text, html });
-          console.debug('[mailer] Cancel email result for partner:', to, sendRes && sendRes.success ? 'ok' : sendRes);
-
-          if (sendRes && sendRes.success) {
-            try {
-              await db.collection('partners').updateOne({ _id: oid }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
-            } catch (upErr) { /* ignore */ }
-          } else {
-            try {
-              await db.collection('partners').updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
-            } catch (upErr) { /* ignore */ }
-          }
+          const html = `<p>Hello ${out.name || out.company || ''},</p><p>Your partner registration (ID: <strong>${out.id}</strong>) has been <strong>cancelled</strong>.</p>`;
+          await sendMail({ to, subject, text, html });
         } catch (mailErr) {
-          console.error('[mailer] Cancel email error for partner:', mailErr && (mailErr.stack || mailErr));
-          try {
-            await db.collection('partners').updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
-          } catch {}
+          console.error('[partners] cancel email error:', mailErr && (mailErr.stack || mailErr));
         }
       })();
     }
