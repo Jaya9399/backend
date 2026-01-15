@@ -2,43 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient');
-const mailer = require('../utils/mailer'); // expects sendMail({...})
+const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized mail + badge sender
 
 // parse JSON bodies for routes in this router
 router.use(express.json({ limit: '6mb' }));
 
-function buildSpeakerAckEmail({ name = '', ticket_code = '' } = {}) {
-  const subject = 'RailTrans Expo — Speaker Registration Confirmed';
-
-  const text = `Hello ${name || 'Speaker'},
-
-Thank you for registering as a Speaker at RailTrans Expo.
-
-Your registration code is: ${ticket_code}
-
-Our team will reach out with session details soon.
-
-Regards,
-RailTrans Expo Team
-support@railtransexpo.com
-`;
-
-  const html = `
-<p>Hello ${name || 'Speaker'},</p>
-<p>Thank you for registering as a <strong>Speaker</strong> at <strong>RailTrans Expo</strong>.</p>
-<p><strong>Your registration code:</strong> ${ticket_code}</p>
-<p>Our team will contact you shortly with session details.</p>
-<p>Regards,<br/>
-<strong>RailTrans Expo Team</strong><br/>
-<a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a>
-</p>`;
-
-  return {
-    subject,
-    text,
-    html,
-    from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
-  };
+function generateTicketCode() {
+  return String(Math.floor(10000 + Math.random() * 90000));
 }
 
 async function obtainDb() {
@@ -57,15 +27,10 @@ function docToOutput(doc) {
   const out = { ...doc };
   if (out._id) {
     out.id = String(out._id);
-    // keep original _id present as well for raw usage if caller expects it
   } else {
     out.id = null;
   }
   return out;
-}
-
-function generateTicketCode() {
-  return String(Math.floor(10000 + Math.random() * 90000));
 }
 
 /**
@@ -145,20 +110,28 @@ router.post('/', async (req, res) => {
           console.warn('[speakers] saved but no valid email; skipping ack mail');
           return;
         }
-        const mail = buildSpeakerAckEmail({
-          name: doc.name || '',
-          ticket_code: doc.ticket_code || '',
+
+        const result = await sendTicketEmail({
+          entity: 'speakers',
+          record: savedDoc,
+          options: { forceSend: false, includeBadge: true },
         });
-        await mailer.sendMail({
-          to: doc.email,
-          subject: mail.subject,
-          text: mail.text,
-          html: mail.html,
-          from: mail.from,
-        });
-        console.log('[speakers] ack mail sent to', doc.email);
+
+        if (result && result.success) {
+          try {
+            await col.updateOne({ _id: r.insertedId }, { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } });
+            console.log('[speakers] ack mail sent to', doc.email);
+          } catch (upErr) {
+            console.warn('[speakers] ack mail sent but failed to update DB flags:', upErr && (upErr.message || upErr));
+          }
+        } else {
+          console.error('[speakers] ack mail failed:', result && result.error ? result.error : result);
+          try {
+            await col.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
+          } catch (upErr) { /* ignore */ }
+        }
       } catch (e) {
-        console.error('[speakers] ack mail failed:', e && (e.message || e));
+        console.error('[speakers] ack mail background error:', e && (e.stack || e));
         try {
           if (r && r.insertedId) {
             await col.updateOne(
@@ -179,7 +152,7 @@ router.post('/', async (req, res) => {
 
 /**
  * POST /api/speakers/:id/resend-email
- * Resend confirmation email for speaker using simple builder.
+ * Delegate email sending to centralized util and update DB flags accordingly.
  */
 router.post('/:id/resend-email', async (req, res) => {
   try {
@@ -194,22 +167,18 @@ router.post('/:id/resend-email', async (req, res) => {
     if (!doc) return res.status(404).json({ success: false, error: 'Speaker not found' });
     if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: 'No valid email found for speaker' });
 
-    const mail = buildSpeakerAckEmail({
-      name: doc.name || '',
-      ticket_code: doc.ticket_code || '',
-    });
-
     try {
-      await mailer.sendMail({
-        to: doc.email,
-        subject: mail.subject,
-        text: mail.text,
-        html: mail.html,
-        from: mail.from,
-      });
-      return res.json({ success: true });
+      const result = await sendTicketEmail({ entity: 'speakers', record: doc, options: { forceSend: true, includeBadge: true } });
+
+      if (result && result.success) {
+        await col.updateOne({ _id: oid }, { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } });
+        return res.json({ success: true });
+      } else {
+        await col.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
+        return res.status(500).json({ success: false, error: result && result.error ? result.error : 'Failed to send email' });
+      }
     } catch (e) {
-      console.error('[speakers] resend failed:', e && (e.message || e));
+      console.error('[speakers] resend failed:', e && (e.stack || e));
       try { await col.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }); } catch {}
       return res.status(500).json({ success: false, error: 'Failed to resend email' });
     }
@@ -295,7 +264,5 @@ router.put('/:id', async (req, res) => {
     return res.status(500).json({ success: false, error: 'Failed to update speaker' });
   }
 });
-
-/* Additional endpoints (confirm/delete etc.) can be added similarly if needed */
 
 module.exports = router;

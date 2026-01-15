@@ -2,8 +2,7 @@ const express = require("express");
 const router = express.Router();
 const mongo = require("../utils/mongoClient");
 const { ObjectId } = require("mongodb");
-const mailer = require("../utils/mailer");
-const { buildTicketEmail } = require("../utils/emailTemplate");
+const sendTicketEmail = require("../utils/sendTicketEmail"); // centralized email + badge sender
 
 router.use(express.json({ limit: "6mb" }));
 
@@ -30,12 +29,6 @@ function isEmailLike(v) {
   return typeof v === "string" && /\S+@\S+\.\S+/.test(v);
 }
 
-function resolveRole(doc = {}) {
-  if (doc.ticket_category) return String(doc.ticket_category).toUpperCase();
-  if (Number(doc.amount || doc.total || 0) > 0) return "DELEGATE";
-  return "VISITOR";
-}
-
 /**
  * GET /api/visitors
  */
@@ -44,6 +37,7 @@ router.get("/", async (req, res) => {
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
   try {
+    // note: this file historically used createdAt; keep the same to avoid surprises
     const rows = await db.collection("visitors").find({}).sort({ createdAt: -1 }).toArray();
     return res.json({ success: true, data: rows });
   } catch (err) {
@@ -54,23 +48,22 @@ router.get("/", async (req, res) => {
 
 /**
  * GET /api/visitors/:id
+ *
+ * Accept ObjectId or ticket_code
  */
 router.get("/:id", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
   const id = req.params.id;
-  // accept either ObjectId or ticket_code as fallback
   let doc = null;
   const coll = db.collection("visitors");
 
-  // Try ObjectId
   const oid = toObjectId(id);
   if (oid) {
     doc = await coll.findOne({ _id: oid }).catch(() => null);
   }
 
-  // fallback: not ObjectId or not found -> try ticket_code
   if (!doc) {
     doc = await coll.findOne({ ticket_code: id }).catch(() => null);
   }
@@ -82,7 +75,7 @@ router.get("/:id", async (req, res) => {
 
 /**
  * POST /api/visitors
- * Create visitor (admin flag optional). Do NOT send email here.
+ * Create visitor (admin flag optional). Do NOT send email here (visitors are admin-created by default).
  */
 router.post("/", async (req, res) => {
   const db = await obtainDb();
@@ -139,18 +132,13 @@ router.put("/:id", async (req, res) => {
 
   try {
     const fields = { ...(req.body || {}) };
-    // don't allow changing _id
     delete fields._id;
     delete fields.id;
 
     if (Object.keys(fields).length === 0) return res.status(400).json({ success: false, error: "No fields to update" });
 
-    // If data/form nested, allow replacing doc.data
     const update = {};
-    for (const [k, v] of Object.entries(fields)) {
-      // keep objects as-is (Mongo can store objects); stringify only where necessary
-      update[k] = v;
-    }
+    for (const [k, v] of Object.entries(fields)) update[k] = v;
     update.updatedAt = new Date();
 
     const coll = db.collection("visitors");
@@ -167,18 +155,19 @@ router.put("/:id", async (req, res) => {
 
 /**
  * POST /api/visitors/:id/resend-email
- * Send email + (optionally) generate badge; similar to your existing handler.
+ *
+ * IMPORTANT: this route delegates the email + badge generation to a centralized util
+ * `utils/sendTicketEmail.js`. That util handles role-specific templates, attachments,
+ * PDF badge generation, retries and returns a standardized result.
+ *
+ * The handler here updates email_sent_at/email_failed flags based on that result.
  */
 router.post("/:id/resend-email", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
-  let oid;
-  try {
-    oid = new ObjectId(req.params.id);
-  } catch {
-    return res.status(400).json({ success: false, error: "Invalid ID" });
-  }
+  const oid = toObjectId(req.params.id);
+  if (!oid) return res.status(400).json({ success: false, error: "Invalid ID" });
 
   const coll = db.collection("visitors");
   const doc = await coll.findOne({ _id: oid });
@@ -186,51 +175,22 @@ router.post("/:id/resend-email", async (req, res) => {
 
   if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: "Invalid email" });
 
-  let badgeDataUri = "";
   try {
-    const { generateBadge } = require("../utils/badgeGenerator");
-    const badge = await generateBadge({
-      name: doc.name || "Attendee",
-      company: doc.data?.company || "",
-      ticketCode: doc.ticket_code,
-      roleLabel: resolveRole(doc),
-      badgeNumber: doc.ticket_code,
-    });
-    if (badge?.pngBase64) badgeDataUri = `data:image/png;base64,${badge.pngBase64}`;
-  } catch (err) {
-    console.warn("[badge] skipped:", err && (err.message || err));
-  }
-
-  const frontendBase = process.env.FRONTEND_BASE || "";
-  const tpl = await buildTicketEmail({
-    frontendBase,
-    entity: "visitors",
-    id: String(doc._id),
-    name: doc.name || "Participant",
-    company: doc.data?.company || "",
-    ticket_category: doc.ticket_category || "",
-    badgePreviewUrl: badgeDataUri,
-    downloadUrl: `${frontendBase}/ticket-download?entity=visitors&id=${doc._id}`,
-    form: doc.data || {},
-    ticket_code: doc.ticket_code,
-  });
-
-  try {
-    const sendRes = await mailer.sendMail({
-      to: doc.email,
-      subject: tpl.subject,
-      text: tpl.text,
-      html: tpl.html,
-      attachments: tpl.attachments || [],
+    const result = await sendTicketEmail({
+      entity: "visitors",
+      record: doc,
+      options: { forceSend: true }, // ensure a resend attempts delivery
     });
 
-    if (sendRes?.success) {
+    if (result && result.success) {
       await coll.updateOne({ _id: oid }, { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } });
       return res.json({ success: true });
-    } else {
-      await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
-      return res.status(500).json({ success: false, error: sendRes?.error || "Mail failed" });
     }
+
+    // send failed
+    await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
+    console.error("[visitors] resend-email failed result:", result);
+    return res.status(500).json({ success: false, error: result && result.error ? result.error : "Failed to send email" });
   } catch (err) {
     console.error("[visitors] resend mail error:", err && (err.stack || err));
     await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }).catch(() => {});

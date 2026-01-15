@@ -3,6 +3,7 @@ const router = express.Router();
 const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient');
 const { sendMail } = require('../utils/mailer');
+const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized ticket email + badge sender
 
 // parse JSON bodies for this router
 router.use(express.json({ limit: '5mb' }));
@@ -41,18 +42,6 @@ support@railtransexpo.com
     html,
     from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
   };
-}
-
-function buildPartnerNotificationEmail({ name = '', company = '' } = {}) {
-  const subject = 'RailTrans Expo — Partner Notification';
-  const text = `Hello ${name || company || 'Partner'},
-
-This is a notification regarding your partner registration.
-
-Regards,
-RailTrans Expo Team`;
-  const html = `<p>Hello ${name || company || 'Partner'},</p><p>This is a notification regarding your partner registration.</p><p>Regards,<br/>RailTrans Expo Team</p>`;
-  return { subject, text, html, from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>' };
 }
 
 async function obtainDb() {
@@ -105,6 +94,9 @@ router.post('/step', async (req, res) => {
 /**
  * POST /api/partners
  * Register partner (Mongo-backed)
+ *
+ * IMPORTANT: Default ACK email is ALWAYS sent (background) for every created partner,
+ * regardless of added_by_admin. This is the "DEFAULT ACK EMAIL" (no ticket, no badge).
  */
 router.post('/', async (req, res) => {
   try {
@@ -165,18 +157,15 @@ router.post('/', async (req, res) => {
     const r = await col.insertOne(doc);
     const insertedId = r && r.insertedId ? String(r.insertedId) : null;
 
-    if (doc.added_by_admin) {
-      return res.status(201).json(convertBigIntForJson({ success: true, insertedId, id: insertedId, mail: { skipped: true } }));
-    }
-
+    // Always respond quickly; mail is sent in background
     res.status(201).json(convertBigIntForJson({ success: true, insertedId, id: insertedId, mail: { queued: true } }));
 
+    // Background: send default ACK email (NO ticket, NO badge) and notify admins
     (async () => {
       try {
         if (!insertedId) return;
         const saved = await col.findOne({ _id: r.insertedId });
         const to = (saved && saved.email) || null;
-
         if (to && isEmailLike(to)) {
           const mail = buildPartnerAckEmail({ name: saved.name || '', company: saved.company || '' });
           try {
@@ -191,6 +180,7 @@ router.post('/', async (req, res) => {
           console.warn('[partners] partner saved but no valid email; skipping ack mail');
         }
 
+        // Admin notifications (unchanged)
         const adminEnv = (process.env.PARTNER_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
         const adminAddrs = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
         if (adminAddrs.length) {
@@ -211,65 +201,6 @@ router.post('/', async (req, res) => {
     return;
   } catch (err) {
     console.error('[partners] register error:', err && (err.stack || err));
-    return res.status(500).json({ success: false, error: err && err.message ? err.message : String(err) });
-  }
-});
-
-/**
- * POST /api/partners/notify
- */
-router.post('/notify', async (req, res) => {
-  try {
-    const { partnerId, form } = req.body || {};
-    let partner = null;
-    const db = await obtainDb();
-    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
-
-    if (partnerId) {
-      let oid;
-      try { oid = new ObjectId(partnerId); } catch { return res.status(400).json({ success: false, error: 'invalid partnerId' }); }
-      const doc = await db.collection('partners').findOne({ _id: oid });
-      partner = doc ? docToOutput(doc) : null;
-    } else if (form) {
-      partner = form;
-    } else {
-      return res.status(400).json({ success: false, error: 'partnerId or form required' });
-    }
-
-    const to = partner && (partner.email || partner.emailAddress || partner.contactEmail);
-    const name = partner && (partner.name || partner.company || '');
-    const mail = buildPartnerNotificationEmail({ name: name || '', company: partner && partner.company });
-
-    const resPartnerMail = to && isEmailLike(to) ? await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html }).catch(e => ({ success: false, error: String(e && e.message ? e.message : e) })) : { success: false, error: 'no-recipient-or-invalid-email' };
-
-    if (partner && partner.id && resPartnerMail && resPartnerMail.success) {
-      try {
-        await db.collection('partners').updateOne({ _id: new ObjectId(partner.id) }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
-      } catch (upErr) { /* ignore */ }
-    }
-
-    const adminEnv = (process.env.PARTNER_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
-    const adminAddrs = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-    const adminResults = [];
-
-    if (adminAddrs.length) {
-      const adminSubject = `Partner notification — ${partnerId || (partner && (partner.name || partner.company)) || 'new'}`;
-      const adminHtml = `<p>Partner notification sent.</p><pre>${JSON.stringify(partner, null, 2)}</pre>`;
-      const adminText = `Partner notification\n${JSON.stringify(partner, null, 2)}`;
-
-      for (const a of adminAddrs) {
-        try {
-          const r = await sendMail({ to: a, subject: adminSubject, text: adminText, html: adminHtml });
-          adminResults.push({ to: a, result: r });
-        } catch (e) {
-          adminResults.push({ to: a, error: String(e && e.message ? e.message : e) });
-        }
-      }
-    }
-
-    return res.json(convertBigIntForJson({ success: true, partnerMail: resPartnerMail, adminResults }));
-  } catch (err) {
-    console.error('[partners] notify error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: err && err.message ? err.message : String(err) });
   }
 });
@@ -362,7 +293,7 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-/* ---------- Approve / Cancel endpoints ---------- */
+/* ---------- Approve / Cancel endpoints (status emails only, no ticket logic) ---------- */
 
 /**
  * POST /api/partners/:id/approve
@@ -391,7 +322,7 @@ router.post('/:id/approve', async (req, res) => {
 
     res.json(convertBigIntForJson({ success: true, id, updated: out }));
 
-    // Background: notify partner & admins (best-effort)
+    // Background: notify partner & admins (status email, NO ticket, NO badge)
     if (out && isEmailLike(out.email)) {
       (async () => {
         try {
@@ -445,7 +376,7 @@ router.post('/:id/cancel', async (req, res) => {
 
     res.json(convertBigIntForJson({ success: true, id, updated: out }));
 
-    // Background: notify partner & admins (best-effort)
+    // Background: notify partner & admins (status email, NO ticket, NO badge)
     if (out && isEmailLike(out.email)) {
       (async () => {
         try {
@@ -469,6 +400,48 @@ RailTrans Expo Team`;
     console.error('Cancel partner error:', err && (err.stack || err));
     const message = (err && (err.sqlMessage || err.message)) || 'Server error cancelling partner';
     return res.status(500).json({ success: false, error: message });
+  }
+});
+
+/* ---------- Ticket send / resend endpoint ---------- */
+
+/**
+ * POST /api/partners/:id/resend-email
+ *
+ * This endpoint is the ONLY place that sends the "TICKET EMAIL" (badge, QR, ticket).
+ * It delegates to utils/sendTicketEmail which centralizes template + badge generation.
+ */
+router.post('/:id/resend-email', async (req, res) => {
+  try {
+    const db = await obtainDb();
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
+
+    let oid;
+    try { oid = new ObjectId(req.params.id); } catch { return res.status(400).json({ success: false, error: 'invalid id' }); }
+
+    const col = db.collection('partners');
+    const doc = await col.findOne({ _id: oid });
+    if (!doc) return res.status(404).json({ success: false, error: 'Partner not found' });
+    if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: 'No valid email found for partner' });
+
+    try {
+      const result = await sendTicketEmail({ entity: 'partners', record: doc, options: { forceSend: true, includeBadge: true } });
+
+      if (result && result.success) {
+        await col.updateOne({ _id: oid }, { $set: { ticket_email_sent_at: new Date() }, $unset: { ticket_email_failed: "" } });
+        return res.json({ success: true, mail: { ok: true } });
+      } else {
+        await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } });
+        return res.status(500).json({ success: false, error: result && result.error ? result.error : 'Failed to send ticket email' });
+      }
+    } catch (e) {
+      console.error('[partners] resend ticket failed:', e && (e.stack || e));
+      try { await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } }); } catch {}
+      return res.status(500).json({ success: false, error: 'Failed to resend ticket email' });
+    }
+  } catch (err) {
+    console.error('[partners] resend-email error:', err && (err.stack || err));
+    return res.status(500).json({ success: false, error: 'Server error resending ticket email' });
   }
 });
 
