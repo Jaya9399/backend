@@ -6,6 +6,7 @@ const fs = require('fs');
 const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient'); // must expose getDb() or .db
 const mailer = require('../utils/mailer'); // expects sendMail(opts) -> { success, info?, error?, dbRecordId? }
+const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized ticket email + badge sender
 
 // Try to reuse safeFieldName if available, otherwise provide local fallback
 let safeFieldName;
@@ -90,17 +91,18 @@ async function loadAdminFields(db, pageName = 'awardee') {
   }
 }
 
-/* ---------- Simple awardee email builder (mirrors exhibitors style) ---------- */
-function buildAwardeeAckEmail({ name = '', ticket_code = '' } = {}) {
-  const subject = 'RailTrans Expo Registration Confirmed';
+/* ---------- ACK email builder (no ticket info) ----------
+   IMPORTANT: This is the DEFAULT ACK EMAIL. It MUST NOT include ticket_code,
+   badge, QR, or any ticket attachments. Ticket emails are sent only via
+   sendTicketEmail() and the dedicated endpoint /:id/send-ticket.
+*/
+function buildAwardeeAckEmail({ name = '' } = {}) {
+  const subject = 'RailTrans Expo — Registration Received';
   const text = `Hello ${name || 'Participant'},
 
 Thank you for registering for RailTrans Expo.
 
-Your registration has been received successfully.
-Your ticket code is: ${ticket_code}
-
-Our team looks forward to welcoming you.
+We have received your registration and our team will review the details. You will receive further communication from us soon.
 
 Regards,
 RailTrans Expo Team
@@ -109,9 +111,7 @@ support@railtransexpo.com
 
   const html = `
 <p>Hello ${name || 'Participant'},</p>
-<p>Thank you for registering for <strong>RailTrans Expo</strong>.</p>
-<p><strong>Your ticket code:</strong> ${ticket_code}</p>
-<p>We look forward to welcoming you.</p>
+<p>Thank you for registering for <strong>RailTrans Expo</strong>. We have received your registration and our team will review the details. You will receive further communication from us soon.</p>
 <p>Regards,<br/>
 <strong>RailTrans Expo Team</strong><br/>
 <a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a>
@@ -129,8 +129,10 @@ support@railtransexpo.com
 
 /**
  * POST /api/awardees
- * Create a new awardee, respond immediately, send confirmation email in background.
- * If created with added_by_admin === true, persist flag, set admin_created_at and SKIP emails/notify.
+ * Create a new awardee, respond immediately, send ACK confirmation email in background.
+ * If created with added_by_admin === true, persist flag, set admin_created_at and SKIP ack email.
+ *
+ * NOTE: ACK email does NOT include ticket info. Tickets are sent only via POST /api/awardees/:id/send-ticket
  */
 router.post('/', async (req, res) => {
   try {
@@ -235,7 +237,7 @@ router.post('/', async (req, res) => {
       }));
     }
 
-    // non-admin: queue/send in background; indicate queued in response
+    // non-admin: queue/send ACK in background; indicate queued in response
     res.status(201).json(convertBigIntForJson({
       success: true,
       insertedId,
@@ -244,13 +246,12 @@ router.post('/', async (req, res) => {
       mail: { queued: true }
     }));
 
-    // background email (fire-and-forget)
+    // background ACK email (fire-and-forget) -- NOTE: ACK does NOT include ticket info
     (async () => {
       try {
         if (!doc.email) return;
         const mail = buildAwardeeAckEmail({
           name: doc.name || doc.organization,
-          ticket_code: doc.ticket_code,
         });
         try {
           await mailer.sendMail({
@@ -280,6 +281,9 @@ router.post('/', async (req, res) => {
 
 /**
  * POST /api/awardees/:id/resend-email
+ *
+ * WARNING: This endpoint now only re-sends the ACK email (no ticket).
+ * Use POST /api/awardees/:id/send-ticket to send the ticket (badge, QR, etc).
  */
 router.post('/:id/resend-email', async (req, res) => {
   try {
@@ -295,7 +299,6 @@ router.post('/:id/resend-email', async (req, res) => {
 
     const mail = buildAwardeeAckEmail({
       name: doc.name || doc.organization,
-      ticket_code: doc.ticket_code,
     });
 
     try {
@@ -306,15 +309,55 @@ router.post('/:id/resend-email', async (req, res) => {
         html: mail.html,
         from: mail.from,
       });
-      return res.json({ success: true });
+      await db.collection('awardees').updateOne({ _id: oid }, { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } });
+      return res.json({ success: true, mail: { ok: true } });
     } catch (e) {
-      console.error('[awardees] resend error:', e && (e.message || e));
+      console.error('[awardees] resend ack failed:', e && (e.message || e));
       try { await db.collection('awardees').updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }); } catch {}
-      return res.status(500).json({ success: false, error: 'Failed to resend email' });
+      return res.status(500).json({ success: false, error: 'Failed to resend ack email' });
     }
   } catch (e) {
-    console.error('[awardees] resend error:', e && (e.stack || e));
-    return res.status(500).json({ success: false, error: 'Failed to resend email' });
+    console.error('[awardees] resend ack error:', e && (e.stack || e));
+    return res.status(500).json({ success: false, error: 'Failed to resend ack email' });
+  }
+});
+
+/**
+ * POST /api/awardees/:id/send-ticket
+ *
+ * NEW: This endpoint is the ONLY place that sends the "TICKET EMAIL" (badge, QR, etc).
+ * It delegates to utils/sendTicketEmail which centralizes template + badge generation.
+ */
+router.post('/:id/send-ticket', async (req, res) => {
+  try {
+    const db = await obtainDb();
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
+
+    let oid;
+    try { oid = new ObjectId(req.params.id); } catch { return res.status(400).json({ success: false, error: 'invalid id' }); }
+
+    const doc = await db.collection('awardees').findOne({ _id: oid });
+    if (!doc) return res.status(404).json({ success: false, error: 'Awardee not found' });
+    if (!doc.email) return res.status(400).json({ success: false, error: 'No email found for awardee' });
+
+    try {
+      const result = await sendTicketEmail({ entity: 'awardees', record: doc, options: { forceSend: true, includeBadge: true } });
+
+      if (result && result.success) {
+        await db.collection('awardees').updateOne({ _id: oid }, { $set: { ticket_email_sent_at: new Date() }, $unset: { ticket_email_failed: "" } });
+        return res.json({ success: true, mail: { ok: true, info: result.info || null } });
+      } else {
+        await db.collection('awardees').updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } });
+        return res.status(500).json({ success: false, mail: { ok: false, error: result && result.error ? result.error : 'ticket_send_failed' } });
+      }
+    } catch (e) {
+      console.error('[awardees] send-ticket failed:', e && (e.stack || e));
+      try { await db.collection('awardees').updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } }); } catch {}
+      return res.status(500).json({ success: false, error: 'Failed to send ticket email' });
+    }
+  } catch (e) {
+    console.error('[awardees] send-ticket error:', e && (e.stack || e));
+    return res.status(500).json({ success: false, error: 'Failed to send ticket email' });
   }
 });
 
@@ -336,11 +379,14 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /api/awardees/send-reminders
+ *
+ * Reminder emails must NOT include ticket attachments or QR.
+ * They are simple reminders; ticketed reminders should be produced by calling send-ticket.
  */
 router.post('/send-reminders', async (req, res) => {
   try {
     const db = await obtainDb();
-    if (!db) return res.status(500).json({ success: false, error: 'database not available' });;
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
     const cursor = db.collection('awardees').find({
       email: { $exists: true, $ne: "" }
@@ -355,17 +401,14 @@ router.post('/send-reminders', async (req, res) => {
         const subject = `Reminder: RailTrans Expo`;
         const text = `Hello ${doc.name || doc.organization || 'Participant'},
 
-This is a reminder for RailTrans Expo.
-
-Your ticket code: ${doc.ticket_code || 'N/A'}
+This is a reminder about RailTrans Expo. We will be in touch with further details soon.
 
 Regards,
 RailTrans Expo Team`;
 
         const html = `
 <p>Hello ${doc.name || doc.organization || 'Participant'},</p>
-<p>This is a reminder for <strong>RailTrans Expo</strong>.</p>
-<p><strong>Your ticket code:</strong> ${doc.ticket_code || 'N/A'}</p>
+<p>This is a reminder about <strong>RailTrans Expo</strong>. We will be in touch with further details soon.</p>
 <p>Regards,<br/>RailTrans Expo Team</p>
 `;
 
