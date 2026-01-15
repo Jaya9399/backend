@@ -9,7 +9,7 @@ router.use(express.json({ limit: "6mb" }));
 async function obtainDb() {
   try {
     if (!mongo) return null;
-    if (typeof mongo.getDb === "function") return await mongo.getDb();
+    if (typeof mongo. getDb === "function") return await mongo.getDb();
     if (mongo.db) return mongo.db;
     return null;
   } catch {
@@ -37,11 +37,10 @@ router.get("/", async (req, res) => {
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
   try {
-    // note: this file historically used createdAt; keep the same to avoid surprises
     const rows = await db.collection("visitors").find({}).sort({ createdAt: -1 }).toArray();
     return res.json({ success: true, data: rows });
   } catch (err) {
-    console.error("[visitors] list error:", err && (err.stack || err));
+    console.error("[visitors] list error:", err && (err. stack || err));
     return res.status(500).json({ success: false, error: "Failed to list visitors" });
   }
 });
@@ -51,7 +50,7 @@ router.get("/", async (req, res) => {
  *
  * Accept ObjectId or ticket_code
  */
-router.get("/:id", async (req, res) => {
+router. get("/:id", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
@@ -75,11 +74,11 @@ router.get("/:id", async (req, res) => {
 
 /**
  * POST /api/visitors
- * Create visitor (admin flag optional). Do NOT send email here (visitors are admin-created by default).
+ * Create visitor and send email in background (unless added_by_admin is true).
  */
 router.post("/", async (req, res) => {
   const db = await obtainDb();
-  if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
+  if (!db) return res.status(500).json({ success: false, error:  "DB not ready" });
 
   try {
     const body = req.body || {};
@@ -87,40 +86,99 @@ router.post("/", async (req, res) => {
 
     const email = String(form.email || "").trim();
     if (!isEmailLike(email)) {
-      return res.status(400).json({ success: false, message: "Valid email required" });
+      return res. status(400).json({ success: false, message: "Valid email required" });
     }
 
     const ticket_code = form.ticket_code || String(Math.floor(100000 + Math.random() * 900000));
 
     const doc = {
       role: "visitor",
-      name: form.name || null,
+      name: form. name || null,
       email,
       mobile: form.mobile || null,
       ticket_code,
       data: form,
       createdAt: new Date(),
       updatedAt: new Date(),
-      added_by_admin: !!body.added_by_admin,
+      added_by_admin:  !!body.added_by_admin,
       admin_created_at: body.added_by_admin ? new Date(body.admin_created_at || Date.now()) : undefined,
     };
 
-    const r = await db.collection("visitors").insertOne(doc);
-    return res.json({
+    const coll = db.collection("visitors");
+    const r = await coll.insertOne(doc);
+    const insertedId = r.insertedId ? String(r.insertedId) : null;
+
+    // If created by admin, skip email and return immediately
+    if (doc.added_by_admin) {
+      return res.json({
+        success: true,
+        insertedId,
+        ticket_code,
+        mail: { skipped: true },
+      });
+    }
+
+    // Non-admin:  respond immediately and queue email in background
+    res.json({
       success: true,
-      insertedId: r.insertedId ? String(r.insertedId) : null,
+      insertedId,
       ticket_code,
-      mail: { skipped: !!doc.added_by_admin },
+      mail: { queued: true },
     });
+
+    // Background email send (fire-and-forget)
+    (async () => {
+      try {
+        const savedDoc = await coll.findOne({ _id: r.insertedId });
+        if (! savedDoc) {
+          console.warn("[visitors] saved but cannot retrieve doc for email");
+          return;
+        }
+
+        if (!isEmailLike(savedDoc.email)) {
+          console. warn("[visitors] saved but no valid email; skipping mail");
+          return;
+        }
+
+        const result = await sendTicketEmail({
+          entity: "visitors",
+          record: savedDoc,
+          options: { forceSend: false, includeBadge: true },
+        });
+
+        if (result && result.success) {
+          try {
+            await coll.updateOne({ _id: r.insertedId }, { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } });
+            console.log("[visitors] email sent to", savedDoc.email);
+          } catch (upErr) {
+            console.warn("[visitors] email sent but failed to update DB flags:", upErr && (upErr.message || upErr));
+          }
+        } else {
+          console.error("[visitors] email failed:", result && result.error ?  result.error : result);
+          try {
+            await coll.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
+          } catch (upErr) { /* ignore */ }
+        }
+      } catch (e) {
+        console.error("[visitors] background email error:", e && (e.stack || e));
+        try {
+          if (r && r.insertedId) {
+            await coll.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
+          }
+        } catch (upErr) { /* ignore */ }
+      }
+    })();
+
+    return;
   } catch (err) {
-    console.error("[visitors] create error:", err && (err.stack || err));
+    console.error("[visitors] create error:", err && (err. stack || err));
     return res.status(500).json({ success: false, error: "Failed to create visitor" });
   }
 });
 
 /**
  * PUT /api/visitors/:id
- * Update visitor fields (admin/front-end edits). Returns updated doc.
+ * Update visitor fields (admin/front-end edits). Returns updated doc. 
  */
 router.put("/:id", async (req, res) => {
   const db = await obtainDb();
@@ -131,7 +189,7 @@ router.put("/:id", async (req, res) => {
   if (!oid) return res.status(400).json({ success: false, error: "Invalid id" });
 
   try {
-    const fields = { ...(req.body || {}) };
+    const fields = { ...(req. body || {}) };
     delete fields._id;
     delete fields.id;
 
@@ -162,7 +220,7 @@ router.put("/:id", async (req, res) => {
  *
  * The handler here updates email_sent_at/email_failed flags based on that result.
  */
-router.post("/:id/resend-email", async (req, res) => {
+router. post("/:id/resend-email", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
@@ -173,13 +231,12 @@ router.post("/:id/resend-email", async (req, res) => {
   const doc = await coll.findOne({ _id: oid });
   if (!doc) return res.status(404).json({ success: false, error: "Visitor not found" });
 
-  if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: "Invalid email" });
+  if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error:  "Invalid email" });
 
   try {
     const result = await sendTicketEmail({
-      entity: "visitors",
+      entity:  "visitors",
       record: doc,
-      options: { forceSend: true }, // ensure a resend attempts delivery
     });
 
     if (result && result.success) {
@@ -190,7 +247,7 @@ router.post("/:id/resend-email", async (req, res) => {
     // send failed
     await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
     console.error("[visitors] resend-email failed result:", result);
-    return res.status(500).json({ success: false, error: result && result.error ? result.error : "Failed to send email" });
+    return res.status(500).json({ success: false, error:  result && result.error ? result. error : "Failed to send email" });
   } catch (err) {
     console.error("[visitors] resend mail error:", err && (err.stack || err));
     await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }).catch(() => {});
@@ -199,13 +256,13 @@ router.post("/:id/resend-email", async (req, res) => {
 });
 
 /**
- * DELETE /api/visitors/:id
+ * DELETE /api/visitors/: id
  */
 router.delete("/:id", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
-  const id = req.params.id;
+  const id = req. params.id;
   let result = null;
 
   try {
