@@ -92,17 +92,17 @@ router.post('/', async (req, res) => {
     const col = db.collection('exhibitors');
 
     const body = req.body || {};
-    console.info('[exhibitors] create payload keys:', Object.keys(body).length ? Object.keys(body) : '(empty)');
+    console.info('[exhibitors] create payload keys:', Object.keys(body).length ?  Object.keys(body) : '(empty)');
 
     const pick = (keys = []) => {
       for (const k of keys) {
-        if (Object.prototype.hasOwnProperty.call(body, k) && body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') {
+        if (Object.prototype.hasOwnProperty. call(body, k) && body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') {
           return String(body[k]).trim();
         }
       }
       for (const bk of Object.keys(body)) {
         for (const k of keys) {
-          if (bk.toLowerCase() === String(k).toLowerCase() && body[bk] !== undefined && body[bk] !== null && String(body[bk]).trim() !== '') {
+          if (bk. toLowerCase() === String(k).toLowerCase() && body[bk] !== undefined && body[bk] !== null && String(body[bk]).trim() !== '') {
             return String(body[bk]).trim();
           }
         }
@@ -134,7 +134,7 @@ router.post('/', async (req, res) => {
 
     const doc = {};
     for (const [inputKey, docKey] of Object.entries(FIELD_MAP)) {
-      const val = (body[inputKey] !== undefined) ? body[inputKey] : (body[inputKey.toLowerCase()] !== undefined ? body[inputKey.toLowerCase()] : undefined);
+      const val = (body[inputKey] !== undefined) ? body[inputKey] : (body[inputKey. toLowerCase()] !== undefined ? body[inputKey.toLowerCase()] : undefined);
       if (val !== undefined && val !== null && String(val).trim() !== '') {
         doc[docKey] = (typeof val === 'object') ? JSON.stringify(val) : String(val).trim();
       }
@@ -145,7 +145,7 @@ router.post('/', async (req, res) => {
 
     doc.added_by_admin = !!body.added_by_admin;
     if (doc.added_by_admin) {
-      doc.admin_created_at = body.admin_created_at ? new Date(body.admin_created_at) : new Date();
+      doc.admin_created_at = body.admin_created_at ?  new Date(body.admin_created_at) : new Date();
     }
 
     doc.status = 'pending';
@@ -153,24 +153,39 @@ router.post('/', async (req, res) => {
     doc.updated_at = new Date();
 
     const insertRes = await col.insertOne(doc);
-    const insertedId = insertRes && insertRes.insertedId ? String(insertRes.insertedId) : null;
+    const insertedId = insertRes && insertRes.insertedId ?  String(insertRes.insertedId) : null;
 
-    // Respond quickly; mail is sent in background
-    res.status(201).json({ success: true, insertedId, id: insertedId, mail: { queued: true } });
+    // If created by admin, skip email and return immediately
+    if (doc.added_by_admin) {
+      return res.status(201).json({ 
+        success: true, 
+        insertedId, 
+        id: insertedId, 
+        mail: { skipped: true } 
+      });
+    }
+
+    // Non-admin: respond quickly and queue email in background
+    res.status(201).json({ 
+      success: true, 
+      insertedId, 
+      id: insertedId, 
+      mail: { queued:  true } 
+    });
 
     // Background: send default ACK email (NO ticket, NO badge) and notify admins
     (async () => {
       try {
-        if (!insertedId) return;
+        if (! insertedId) return;
         const saved = await col.findOne({ _id: toObjectId(insertedId) });
-        // Skip ACK for admin-created records
-        if (saved && saved.added_by_admin) {
-          console.debug('[exhibitors] admin-created, skipping ack email for', insertedId);
+        
+        if (! saved) {
+          console.warn('[exhibitors] saved but cannot retrieve doc for email');
           return;
         }
 
-        const to = (saved && saved.email) || body.email || null;
-        const name = (saved && (saved.name || saved.company)) || companyVal || '';
+        const to = saved.email || body.email || null;
+        const name = (saved.name || saved.company) || companyVal || '';
 
         if (to && isEmailLike(to)) {
           const mail = buildExhibitorAckEmail({ name });
@@ -183,37 +198,36 @@ router.post('/', async (req, res) => {
             await col.updateOne({ _id: toObjectId(insertedId) }, { $set: { email_failed: true, email_failed_at: new Date() } });
           }
         } else {
-          console.warn('[exhibitors] partner saved but no valid email present; skipping ack mail');
+          console.warn('[exhibitors] exhibitor saved but no valid email present; skipping ack mail');
         }
 
-        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
+        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env. ADMIN_EMAILS || '');
         const adminList = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
         if (adminList.length) {
           const subject = `New exhibitor registration — ID: ${insertedId}`;
-          const html = `<p>New exhibitor registered.</p><pre>${JSON.stringify(saved || body, null, 2)}</pre>`;
+          const html = `<p>New exhibitor registered. </p><pre>${JSON.stringify(saved || body, null, 2)}</pre>`;
           const text = `New exhibitor\n${JSON.stringify(saved || body, null, 2)}`;
           await Promise.all(adminList.map(async (addr) => {
             try {
               await sendMail({ to: addr, subject, text, html });
             } catch (e) {
-              console.error('[exhibitors] admin notify error to', addr, e && (e.message || e));
+              console.error('[exhibitors] admin notify error to', addr, e && (e. message || e));
             }
           }));
         } else {
           console.debug('[exhibitors] no admin emails configured');
         }
       } catch (e) {
-        console.error('[exhibitors] background email error:', e && (e.stack || e));
+        console.error('[exhibitors] background email error:', e && (e. stack || e));
       }
     })();
 
     return;
   } catch (err) {
     console.error('[exhibitors] register error (mongo):', err && (err.stack || err));
-    return res.status(500).json({ success: false, error: 'Server error registering exhibitor', detail: err && err.message ? err.message : String(err) });
+    return res.status(500).json({ success: false, error: 'Server error registering exhibitor', detail: err && err.message ?  err.message : String(err) });
   }
 });
-
 /**
  * POST /api/exhibitors/:id/resend-email
  *
