@@ -235,17 +235,19 @@ if (emailRouter) {
 }
 
 if (remindersRouter) app.use('/api/reminders', remindersRouter);
-if (ticketsScanRouter) app.use('/api/tickets', ticketsScanRouter);
-if (ticketsUpgradeRouter) app.use('/api/tickets', ticketsUpgradeRouter);
 
-// Mount ticketDownload specifically at /api/tickets/download
+// ✅ CRITICAL: Mount /api/tickets/download BEFORE /api/tickets
+// Mount ticketDownload FIRST (most specific route)
 if (ticketDownload) {
   app.use('/api/tickets/download', ticketDownload);
-  console.log('Mounted /api/tickets/download');
+  console.log('✅ Mounted /api/tickets/download');
 } else {
-  console.warn('No ticketDownload router mounted at /api/tickets/download (routes/ticketDownload.js missing)');
+  console.warn('⚠️  No ticketDownload router (routes/ticketDownload.js missing) - email download buttons will not work');
 }
 
+// Then mount general /api/tickets routes (these catch everything else under /api/tickets/*)
+if (ticketsScanRouter) app.use('/api/tickets', ticketsScanRouter);
+if (ticketsUpgradeRouter) app.use('/api/tickets', ticketsUpgradeRouter);
 // Mount image/upload routes at /api so frontend calls like /api/upload-asset and /api/upload-file resolve correctly.
 if (imageUploadRouter) app.use('/api', imageUploadRouter); else console.warn('No image upload router found (routes/imageUpload.js missing)');
 
