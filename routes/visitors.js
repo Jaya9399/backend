@@ -76,17 +76,21 @@ router. get("/:id", async (req, res) => {
  * POST /api/visitors
  * Create visitor and send email in background (unless added_by_admin is true).
  */
+/**
+ * POST /api/visitors
+ * Create visitor and send email in background (ALWAYS, even if added_by_admin).
+ */
 router.post("/", async (req, res) => {
   const db = await obtainDb();
-  if (!db) return res.status(500).json({ success: false, error:  "DB not ready" });
+  if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
   try {
     const body = req.body || {};
-    const form = body.form || body || {};
+    const form = body. form || body || {};
 
     const email = String(form.email || "").trim();
     if (!isEmailLike(email)) {
-      return res. status(400).json({ success: false, message: "Valid email required" });
+      return res.status(400).json({ success: false, message: "Valid email required" });
     }
 
     // Generate unique ticket_code (collision-safe)
@@ -100,7 +104,7 @@ router.post("/", async (req, res) => {
 
     const doc = {
       role: "visitor",
-      name: form. name || null,
+      name: form.name || null,
       email,
       mobile: form.mobile || null,
       ticket_code,
@@ -114,42 +118,34 @@ router.post("/", async (req, res) => {
       data: form,
       createdAt: new Date(),
       updatedAt: new Date(),
-      added_by_admin:  !!body.added_by_admin,
+      
+      // ✅ Track admin creation but DON'T skip email
+      added_by_admin: !!body.added_by_admin,
       admin_created_at: body.added_by_admin ? new Date(body.admin_created_at || Date.now()) : undefined,
     };
 
     const r = await coll.insertOne(doc);
-    const insertedId = r.insertedId ? String(r.insertedId) : null;
+    const insertedId = r.insertedId ?  String(r.insertedId) : null;
 
-    // If created by admin, skip email and return immediately
-    if (doc.added_by_admin) {
-      return res.json({
-        success: true,
-        insertedId,
-        ticket_code,
-        mail: { skipped: true },
-      });
-    }
-
-    // Non-admin:  respond immediately and queue email in background
+    // ✅ ALWAYS respond immediately and queue email (NO skip logic)
     res.json({
       success: true,
       insertedId,
       ticket_code,
-      mail: { queued: true },
+      mail: { queued: true }, // ✅ Email queued regardless of added_by_admin
     });
 
-    // Background email send (fire-and-forget)
+    // Background email send (fire-and-forget) - ALWAYS sent
     (async () => {
       try {
         const savedDoc = await coll.findOne({ _id: r.insertedId });
         if (! savedDoc) {
-          console.warn("[visitors] saved but cannot retrieve doc for email");
+          console. warn("[visitors] saved but cannot retrieve doc for email");
           return;
         }
 
-        if (!isEmailLike(savedDoc.email)) {
-          console. warn("[visitors] saved but no valid email; skipping mail");
+        if (! isEmailLike(savedDoc.email)) {
+          console.warn("[visitors] saved but no valid email; skipping mail");
           return;
         }
 
@@ -161,7 +157,13 @@ router.post("/", async (req, res) => {
 
         if (result && result.success) {
           try {
-            await coll.updateOne({ _id: r.insertedId }, { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } });
+            await coll.updateOne(
+              { _id:  r.insertedId }, 
+              { 
+                $set: { email_sent_at: new Date() }, 
+                $unset: { email_failed:  "" } 
+              }
+            );
             console.log("[visitors] email sent to", savedDoc.email);
           } catch (upErr) {
             console.warn("[visitors] email sent but failed to update DB flags:", upErr && (upErr.message || upErr));
@@ -169,14 +171,24 @@ router.post("/", async (req, res) => {
         } else {
           console.error("[visitors] email failed:", result && result.error ?  result.error : result);
           try {
-            await coll.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
+            await coll.updateOne(
+              { _id:  r.insertedId }, 
+              { 
+                $set:  { email_failed: true, email_failed_at: new Date() } 
+              }
+            );
           } catch (upErr) { /* ignore */ }
         }
       } catch (e) {
         console.error("[visitors] background email error:", e && (e.stack || e));
         try {
           if (r && r.insertedId) {
-            await coll.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
+            await coll.updateOne(
+              { _id: r. insertedId }, 
+              { 
+                $set: { email_failed: true, email_failed_at: new Date() } 
+              }
+            );
           }
         } catch (upErr) { /* ignore */ }
       }
@@ -184,7 +196,7 @@ router.post("/", async (req, res) => {
 
     return;
   } catch (err) {
-    console.error("[visitors] create error:", err && (err. stack || err));
+    console.error("[visitors] create error:", err && (err.stack || err));
     return res.status(500).json({ success: false, error: "Failed to create visitor" });
   }
 });

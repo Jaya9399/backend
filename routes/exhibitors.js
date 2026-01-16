@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
-const mongo = require('../utils/mongoClient'); // must expose getDb() or .db
+const mongo = require('../utils/mongoClient'); // must expose getDb() or . db
 const { sendMail } = require('../utils/mailer'); // keep existing mailer
 const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized ticket email + badge sender
 
@@ -16,7 +16,7 @@ async function obtainDb() {
 }
 
 /**
- * Helper: safe ObjectId parse
+ * Helper:  safe ObjectId parse
  */
 function toObjectId(id) {
   try {
@@ -35,7 +35,7 @@ function isEmailLike(v) {
 
 /**
  * Build the acknowledgement email body (text + html)
- * and return { subject, text, html, from? }.
+ * and return { subject, text, html, from?  }. 
  * This is the DEFAULT ACK EMAIL (no ticket, no badge).
  */
 function buildExhibitorAckEmail({ name = '' } = {}) {
@@ -44,17 +44,17 @@ function buildExhibitorAckEmail({ name = '' } = {}) {
 
 Thank you for showing your interest and choosing to be a part of RailTrans Expo. We truly appreciate your decision to connect with us and explore exhibiting opportunities at our platform.
 
-We are pleased to confirm that your exhibitor request has been received. Our team is currently reviewing the details shared by you and will get back to you shortly with the next steps.
+We are pleased to confirm that your exhibitor request has been received.  Our team is currently reviewing the details shared by you and will get back to you shortly with the next steps.
 
 Regards,
 RailTrans Expo Team
-support@railtransexpo.com
+support@railtransexpo. com
 `;
 
   const html = `<p>Hello ${name},</p>
-<p>Thank you for showing your interest and choosing to be a part of <strong>RailTrans Expo</strong>. We truly appreciate your decision to connect with us and explore exhibiting opportunities at our platform.</p>
+<p>Thank you for showing your interest and choosing to be a part of <strong>RailTrans Expo</strong>. <br> We truly appreciate your decision to connect with us and explore exhibiting opportunities at our platform.</p>
 
-<p>We are pleased to confirm that your exhibitor request has been <strong>successfully received</strong>. Our team is currently reviewing the details shared by you and will get back to you shortly with the next steps.</p>
+<p>We are pleased to confirm that your exhibitor request has been <strong>successfully received</strong>. <br>Our team is currently reviewing the details shared by you and will get back to you shortly with the next steps.</p>
 
 <p>Regards,<br/>
 <strong>RailTrans Expo Team</strong><br/>
@@ -82,14 +82,14 @@ router.post('/step', async (req, res) => {
  * POST /api/exhibitors
  * Create exhibitor (MongoDB implementation)
  *
- * NOTE: Default ACK EMAIL is sent in background (no ticket, no badge) UNLESS
- * the record was created with added_by_admin === true (in which case ACK is skipped).
+ * NOTE: Default ACK EMAIL is sent in background (no ticket, no badge) ALWAYS,
+ * even if created by admin. Admin creation is tracked via added_by_admin flag.
  */
 router.post('/', async (req, res) => {
   try {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
-    const col = db.collection('exhibitors');
+    const col = db. collection('exhibitors');
 
     const body = req.body || {};
     console.info('[exhibitors] create payload keys:', Object.keys(body).length ?  Object.keys(body) : '(empty)');
@@ -149,28 +149,18 @@ router.post('/', async (req, res) => {
     }
 
     doc.status = 'pending';
-    doc.created_at = new Date();
+    doc. created_at = new Date();
     doc.updated_at = new Date();
 
     const insertRes = await col.insertOne(doc);
-    const insertedId = insertRes && insertRes.insertedId ?  String(insertRes.insertedId) : null;
+    const insertedId = insertRes && insertRes.insertedId ? String(insertRes.insertedId) : null;
 
-    // If created by admin, skip email and return immediately
-    if (doc.added_by_admin) {
-      return res.status(201).json({ 
-        success: true, 
-        insertedId, 
-        id: insertedId, 
-        mail: { skipped: true } 
-      });
-    }
-
-    // Non-admin: respond quickly and queue email in background
+    // ✅ ALWAYS respond immediately and queue email (NO skip logic)
     res.status(201).json({ 
       success: true, 
       insertedId, 
       id: insertedId, 
-      mail: { queued:  true } 
+      mail: { queued: true } // ✅ Email queued regardless of added_by_admin
     });
 
     // Background: send default ACK email (NO ticket, NO badge) and notify admins
@@ -179,7 +169,7 @@ router.post('/', async (req, res) => {
         if (! insertedId) return;
         const saved = await col.findOne({ _id: toObjectId(insertedId) });
         
-        if (! saved) {
+        if (!saved) {
           console.warn('[exhibitors] saved but cannot retrieve doc for email');
           return;
         }
@@ -201,24 +191,25 @@ router.post('/', async (req, res) => {
           console.warn('[exhibitors] exhibitor saved but no valid email present; skipping ack mail');
         }
 
-        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env. ADMIN_EMAILS || '');
+        // Admin notifications - send for ALL records (add flag to subject if admin-created)
+        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
         const adminList = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-        if (adminList.length) {
-          const subject = `New exhibitor registration — ID: ${insertedId}`;
+        if (adminList. length) {
+          const subject = `New exhibitor registration — ID: ${insertedId}${doc. added_by_admin ? ' (Admin Created)' : ''}`;
           const html = `<p>New exhibitor registered. </p><pre>${JSON.stringify(saved || body, null, 2)}</pre>`;
           const text = `New exhibitor\n${JSON.stringify(saved || body, null, 2)}`;
           await Promise.all(adminList.map(async (addr) => {
             try {
               await sendMail({ to: addr, subject, text, html });
             } catch (e) {
-              console.error('[exhibitors] admin notify error to', addr, e && (e. message || e));
+              console.error('[exhibitors] admin notify error to', addr, e && (e.message || e));
             }
           }));
         } else {
           console.debug('[exhibitors] no admin emails configured');
         }
       } catch (e) {
-        console.error('[exhibitors] background email error:', e && (e. stack || e));
+        console.error('[exhibitors] background email error:', e && (e.stack || e));
       }
     })();
 
@@ -228,13 +219,14 @@ router.post('/', async (req, res) => {
     return res.status(500).json({ success: false, error: 'Server error registering exhibitor', detail: err && err.message ?  err.message : String(err) });
   }
 });
+
 /**
- * POST /api/exhibitors/:id/resend-email
+ * POST /api/exhibitors/: id/resend-email
  *
  * THIS ENDPOINT MUST ONLY SEND THE TICKET EMAIL (badge, QR, etc).
  * It delegates to utils/sendTicketEmail so template and badge are centralized.
  */
-router.post('/:id/resend-email', async (req, res) => {
+router. post('/:id/resend-email', async (req, res) => {
   try {
     const id = req.params.id;
     console.debug('[exhibitors] resend-email called for id=', id);
@@ -247,11 +239,11 @@ router.post('/:id/resend-email', async (req, res) => {
     if (!oid) return res.status(400).json({ success: false, error: 'invalid id' });
 
     const col = db.collection('exhibitors');
-    const doc = await col.findOne({ _id: oid });
+    const doc = await col. findOne({ _id: oid });
     if (!doc) return res.status(404).json({ success: false, error: 'exhibitor not found' });
 
-    const email = doc.email || (doc.data && (doc.data.email || doc.data.emailAddress)) || '';
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
+    const email = doc.email || (doc.data && (doc.data.email || doc. data.emailAddress)) || '';
+    if (!email || typeof email !== 'string' || ! email.includes('@')) {
       return res.status(400).json({ success: false, error: 'no valid email on record' });
     }
 
@@ -263,12 +255,12 @@ router.post('/:id/resend-email', async (req, res) => {
         return res.json({ success: true, mail: { ok: true, info: result.info || null } });
       } else {
         await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } });
-        return res.status(500).json({ success: false, mail: { ok: false, error: result && result.error ? result.error : 'ticket_send_failed' } });
+        return res.status(500).json({ success: false, mail: { ok: false, error: result && result.error ?  result.error : 'ticket_send_failed' } });
       }
     } catch (e) {
       console.error('[exhibitors] resend-email send error:', e && (e.stack || e));
-      try { await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } }); } catch {}
-      return res.status(500).json({ success: false, mail: { ok: false, error: 'Failed to send ticket email' } });
+      try { await col.updateOne({ _id: oid }, { $set:  { ticket_email_failed: true, ticket_email_failed_at: new Date() } }); } catch {}
+      return res.status(500).json({ success: false, mail: { ok: false, error:  'Failed to send ticket email' } });
     }
   } catch (err) {
     console.error('[exhibitors] resend-email error:', err && (err.stack || err));
@@ -287,9 +279,9 @@ router.get('/', async (req, res) => {
     if (!db) return res.status(500).json({ error: 'database not available' });
     const col = db.collection('exhibitors');
     const rows = await col.find({}).sort({ created_at: -1 }).limit(2000).toArray();
-    return res.json(rows.map(r => {
+    return res.json(rows. map(r => {
       const copy = { ...r };
-      if (copy._id) { copy.id = String(copy._id); }
+      if (copy._id) { copy. id = String(copy._id); }
       return copy;
     }));
   } catch (err) {
@@ -305,10 +297,10 @@ router.get('/:id', async (req, res) => {
   try {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ error: 'database not available' });
-    const oid = toObjectId(req.params.id);
+    const oid = toObjectId(req. params.id);
     if (!oid) return res.status(400).json({ error: 'invalid id' });
     const col = db.collection('exhibitors');
-    const doc = await col.findOne({ _id: oid });
+    const doc = await col. findOne({ _id: oid });
     if (!doc) return res.status(404).json({ error: 'not found' });
     const copy = { ...doc };
     if (copy._id) { copy.id = String(copy._id); }
@@ -326,7 +318,7 @@ router.put('/:id', async (req, res) => {
   try {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
-    const oid = toObjectId(req.params.id);
+    const oid = toObjectId(req. params.id);
     if (!oid) return res.status(400).json({ success: false, error: 'invalid id' });
 
     const fields = { ...(req.body || {}) };
@@ -335,7 +327,7 @@ router.put('/:id', async (req, res) => {
 
     if (Object.keys(fields).length === 0) return res.status(400).json({ success: false, error: 'No fields to update' });
 
-    const update = { ...fields, updated_at: new Date() };
+    const update = { ... fields, updated_at: new Date() };
 
     const col = db.collection('exhibitors');
     const r = await col.updateOne({ _id: oid }, { $set: update });
@@ -353,7 +345,7 @@ router.put('/:id', async (req, res) => {
 });
 
 /**
- * DELETE /api/exhibitors/:id
+ * DELETE /api/exhibitors/: id
  */
 router.delete('/:id', async (req, res) => {
   try {
@@ -363,10 +355,10 @@ router.delete('/:id', async (req, res) => {
     if (!oid) return res.status(400).json({ success: false, error: 'invalid id' });
     const col = db.collection('exhibitors');
     const r = await col.deleteOne({ _id: oid });
-    if (r.deletedCount === 0) return res.status(404).json({ success: false, error: 'Exhibitor not found' });
+    if (r.deletedCount === 0) return res.status(404).json({ success: false, error:  'Exhibitor not found' });
     return res.json({ success: true });
   } catch (err) {
-    console.error('Exhibitor delete (mongo) error:', err && (err.stack || err));
+    console.error('Exhibitor delete (mongo) error:', err && (err. stack || err));
     return res.status(500).json({ success: false, error: 'Failed to delete exhibitor' });
   }
 });
@@ -374,16 +366,16 @@ router.delete('/:id', async (req, res) => {
 /* ---------- Approve / Cancel (status emails only) ---------- */
 
 /**
- * POST /api/exhibitors/:id/approve
+ * POST /api/exhibitors/: id/approve
  */
 router.post('/:id/approve', async (req, res) => {
   const id = req.params.id;
-  const admin = req.body && req.body.admin ? String(req.body.admin) : 'web-admin';
+  const admin = req.body && req.body.admin ?  String(req.body.admin) : 'web-admin';
   if (!id) return res.status(400).json({ success: false, error: 'Missing id' });
 
   try {
     const db = await obtainDb();
-    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
+    if (!db) return res.status(500).json({ success: false, error:  'database not available' });
     const col = db.collection('exhibitors');
 
     const oid = toObjectId(id);
@@ -399,7 +391,7 @@ router.post('/:id/approve', async (req, res) => {
     if (copy._id) { copy.id = String(copy._id); }
 
     // respond quickly
-    res.json({ success: true, id, updated: copy });
+    res.json({ success: true, id, updated:  copy });
 
     // Background: send approval status email (NO ticket, NO badge)
     if (copy && isEmailLike(copy.email)) {
@@ -411,14 +403,14 @@ router.post('/:id/approve', async (req, res) => {
             subject: `Your exhibitor request has been approved — RailTrans Expo`,
             text: `Hello ${name},
 
-Your exhibitor registration (ID: ${copy.id}) has been approved. Our team will contact you with next steps.
+Your exhibitor registration (ID: ${copy. id}) has been approved. Our team will contact you with next steps. 
 
 Regards,
 RailTrans Expo Team
 support@railtransexpo.com`,
-            html: `<p>Hello ${name},</p><p>Your exhibitor registration (ID: <strong>${copy.id}</strong>) has been <strong>approved</strong>.</p>`
+            html: `<p>Hello ${name},</p><p>Your exhibitor registration (ID:  <strong>${copy.id}</strong>) has been <strong>approved</strong>.</p>`
           };
-          await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html });
+          await sendMail({ to, subject: mail. subject, text: mail.text, html: mail.html });
         } catch (e) {
           console.error('[exhibitors] approval email error:', e && (e.stack || e));
         }
@@ -428,11 +420,11 @@ support@railtransexpo.com`,
     // notify admins (background)
     (async () => {
       try {
-        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
+        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env. ADMIN_EMAILS || '');
         const toAddrs = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
         if (!toAddrs.length) return;
-        const subject = `Exhibitor approved — ID: ${updated ? updated._id : id}`;
-        const text = `Exhibitor approved\nID: ${updated ? updated._id : id}\nName: ${updated ? updated.name || updated.company || '' : ''}\nEmail: ${updated ? updated.email : ''}`;
+        const subject = `Exhibitor approved — ID: ${updated ?  updated._id : id}`;
+        const text = `Exhibitor approved\nID: ${updated ? updated._id : id}\nName: ${updated ? updated.name || updated.company || '' : ''}\nEmail: ${updated ? updated.email :  ''}`;
         const html = `<p>Exhibitor approved</p><pre>${JSON.stringify(updated || {}, null, 2)}</pre>`;
         await Promise.all(toAddrs.map(addr => sendMail({ to: addr, subject, text, html }).catch(e => console.error('[exhibitors] admin email error:', addr, e && (e.message || e)))));
       } catch (e) {
@@ -448,11 +440,11 @@ support@railtransexpo.com`,
 });
 
 /**
- * POST /api/exhibitors/:id/cancel
+ * POST /api/exhibitors/: id/cancel
  */
 router.post('/:id/cancel', async (req, res) => {
   const id = req.params.id;
-  const admin = req.body && req.body.admin ? String(req.body.admin) : 'web-admin';
+  const admin = req.body && req.body. admin ? String(req.body. admin) : 'web-admin';
   if (!id) return res.status(400).json({ success: false, error: 'Missing id' });
 
   try {
@@ -479,16 +471,16 @@ router.post('/:id/cancel', async (req, res) => {
       (async () => {
         try {
           const to = copy.email;
-          const name = copy.name || copy.company || '';
+          const name = copy.name || copy. company || '';
           const mail = {
             subject: `Your exhibitor registration has been cancelled — RailTrans Expo`,
             text: `Hello ${name},
 
-Your exhibitor registration (ID: ${copy.id}) has been cancelled. If you believe this is an error, contact support@railtransexpo.com.
+Your exhibitor registration (ID: ${copy.id}) has been cancelled. If you believe this is an error, contact support@railtransexpo. com.
 
 Regards,
 RailTrans Expo Team`,
-            html: `<p>Hello ${name},</p><p>Your exhibitor registration (ID: <strong>${copy.id}</strong>) has been <strong>cancelled</strong>.</p>`
+            html: `<p>Hello ${name},</p><p>Your exhibitor registration (ID:  <strong>${copy.id}</strong>) has been <strong>cancelled</strong>.</p>`
           };
           await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html });
         } catch (e) {
@@ -505,10 +497,10 @@ RailTrans Expo Team`,
         if (!toAddrs.length) return;
         const subject = `Exhibitor cancelled — ID: ${updated ? updated._id : id}`;
         const text = `Exhibitor cancelled\nID: ${updated ? updated._id : id}\nName: ${updated ? updated.name || updated.company || '' : ''}\nEmail: ${updated ? updated.email : ''}`;
-        const html = `<p>Exhibitor cancelled</p><pre>${JSON.stringify(updated || {}, null, 2)}</pre>`;
+        const html = `<p>Exhibitor cancelled</p><pre>${JSON. stringify(updated || {}, null, 2)}</pre>`;
         await Promise.all(toAddrs.map(addr => sendMail({ to: addr, subject, text, html }).catch(e => console.error('[exhibitors] admin cancel notify error:', addr, e && (e.message || e)))));
       } catch (e) {
-        console.error('[exhibitors] admin cancel notify error:', e && (e.stack || e));
+        console.error('[exhibitors] admin cancel notify error:', e && (e. stack || e));
       }
     })();
 
