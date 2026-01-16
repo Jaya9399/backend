@@ -89,7 +89,14 @@ router.post("/", async (req, res) => {
       return res. status(400).json({ success: false, message: "Valid email required" });
     }
 
-    const ticket_code = form.ticket_code || String(Math.floor(100000 + Math.random() * 900000));
+    // Generate unique ticket_code (collision-safe)
+    const coll = db.collection("visitors");
+    let ticket_code = form.ticket_code;
+    if (!ticket_code) {
+      do {
+        ticket_code = String(Math.floor(100000 + Math.random() * 900000));
+      } while (await coll.findOne({ ticket_code }));
+    }
 
     const doc = {
       role: "visitor",
@@ -97,6 +104,13 @@ router.post("/", async (req, res) => {
       email,
       mobile: form.mobile || null,
       ticket_code,
+
+      // 🔥 REQUIRED FOR BADGE
+      txId: form.txId || null,
+      ticket_price: Number(form.ticket_price || 0),
+      ticket_gst: Number(form.ticket_gst || 0),
+      ticket_total: Number(form.ticket_total || 0),
+
       data: form,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -104,7 +118,6 @@ router.post("/", async (req, res) => {
       admin_created_at: body.added_by_admin ? new Date(body.admin_created_at || Date.now()) : undefined,
     };
 
-    const coll = db.collection("visitors");
     const r = await coll.insertOne(doc);
     const insertedId = r.insertedId ? String(r.insertedId) : null;
 
