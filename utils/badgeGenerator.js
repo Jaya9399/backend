@@ -1,8 +1,14 @@
 /**
- * badgeGenerator.js
+ * badgeGenerator. js
  *
- * Responsibility:
- * Generate E-Badge as a PDF (with QR code) for download & email
+ * ONE badge generator for all use cases:  
+ * - Email attachments (mode: "email")
+ * - Scan/print at venue (mode: "scan")
+ * - Admin download
+ *
+ * Supports two modes:
+ * - email: Standard badge with JSON QR payload, normal size, includes footer text
+ * - scan: Optimized for printing with larger QR, simpler payload, NO footer text (ribbon is footer)
  */
 
 const PDFDocument = require("pdfkit");
@@ -13,14 +19,17 @@ const getBadgeTheme = require("./badgeTheme");
  * generateBadgePDF
  *
  * @param {string} entity - visitors | speakers | exhibitors | partners | awardees
- * @param {object} data  - registration document from DB
+ * @param {object} data - registration document from DB
+ * @param {object} options - { mode: "email" | "scan", showFooter: true }
  *
  * @returns {Promise<Buffer>} PDF buffer
  */
-async function generateBadgePDF(entity, data) {
+async function generateBadgePDF(entity, data, options = {}) {
   return new Promise(async (resolve, reject) => {
     try {
-      if (!data || !data.ticket_code) {
+      const { mode = "email", showFooter = true } = options;
+
+      if (! data || ! data.ticket_code) {
         throw new Error("ticket_code is required for badge generation");
       }
 
@@ -28,7 +37,7 @@ async function generateBadgePDF(entity, data) {
       const isPaid =
         Boolean(data.txId) ||
         data.paid === true ||
-        Number(data.amount || data.total || data.price || 0) > 0;
+        Number(data.amount || data.total || data.price || data.ticket_price || data.ticket_total || 0) > 0;
 
       /* ---------- THEME (RIBBON + COLOR) ---------- */
       const { ribbon, color } = getBadgeTheme({
@@ -42,7 +51,7 @@ async function generateBadgePDF(entity, data) {
       });
 
       const buffers = [];
-      doc.on("data", buffers.push.bind(buffers));
+      doc.on("data", buffers.push. bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
       /* ---------- CONSTANT COLORS ---------- */
@@ -70,46 +79,56 @@ async function generateBadgePDF(entity, data) {
         .fill("white");
 
       /* ---------- NAME ---------- */
+      const name = data.name || data. full_name || "Attendee";
       doc
-        .fillColor(DARK)
+        . fillColor(DARK)
         .fontSize(16)
         .font("Helvetica-Bold")
-        .text(data.name || "Attendee", 40, 145, {
+        .text(name, 40, 145, {
           width: 280,
           align: "center",
         });
 
       /* ---------- COMPANY ---------- */
-      if (data.company) {
+      if (data.company || data.organization) {
         doc
           .fillColor(MUTED)
           .fontSize(11)
           .font("Helvetica")
-          .text(data.company, 40, 170, {
+          .text(data.company || data.organization, 40, 170, {
             width: 280,
             align: "center",
           });
       }
 
       /* ---------- QR CODE ---------- */
-      const qrPayload = JSON.stringify({
-        ticket_code: data.ticket_code,
-        name: data.name || "",
-        entity,
-      });
+      // For scan mode:  QR contains just ticket_code (simpler, faster scan)
+      // For email mode: QR contains JSON payload (more info for validation)
+      const qrPayload = mode === "scan"
+        ? data.ticket_code
+        : JSON.stringify({
+            ticket_code: data. ticket_code,
+            name: name,
+            entity,
+          });
+
+      const qrSize = mode === "scan" ? 200 : 180; // Larger QR for scan mode
 
       const qrDataUrl = await QRCode.toDataURL(qrPayload, {
         errorCorrectionLevel: "H",
         margin: 1,
-        width: 180,
+        width: qrSize,
       });
 
-      const qrBase64 = qrDataUrl.split(",")[1];
+      const qrBase64 = qrDataUrl. split(",")[1];
       const qrBuffer = Buffer.from(qrBase64, "base64");
 
-      doc.image(qrBuffer, 90, 205, {
-        width: 180,
-        height: 180,
+      const qrY = mode === "scan" ? 195 : 205;
+      const qrX = (360 - qrSize) / 2;
+
+      doc. image(qrBuffer, qrX, qrY, {
+        width: qrSize,
+        height: qrSize,
       });
 
       /* ---------- TICKET CODE ---------- */
@@ -117,12 +136,12 @@ async function generateBadgePDF(entity, data) {
         .fillColor(DARK)
         .fontSize(10)
         .font("Courier-Bold")
-        .text(`Ticket Code: ${data.ticket_code}`, 0, 395, {
+        .text(`Ticket:  ${data.ticket_code}`, 0, 395, {
           align: "center",
         });
 
       /* ---------- BOTTOM RIBBON ---------- */
-      doc.rect(0, 460, 360, 60).fill(color);
+      doc. rect(0, 460, 360, 60).fill(color);
 
       doc
         .fillColor("white")
@@ -133,19 +152,22 @@ async function generateBadgePDF(entity, data) {
         });
 
       /* ---------- FOOTER TEXT ---------- */
-      doc
-        .fillColor(MUTED)
-        .fontSize(8)
-        .font("Helvetica")
-        .text(
-          "Non-transferable • Valid only for RailTrans Expo 2026",
-          20,
-          510,
-          {
-            width: 320,
-            align: "center",
-          }
-        );
+      // 🔥 FIX: Only show footer text in email mode (scan mode ribbon IS the footer)
+      if (showFooter && mode !== "scan") {
+        doc
+          .fillColor(MUTED)
+          .fontSize(8)
+          .font("Helvetica")
+          .text(
+            "Non-transferable • Valid only for RailTrans Expo 2026",
+            20,
+            495, // 🔥 FIX:  Moved up from 510 to avoid clipping
+            {
+              width: 320,
+              align: "center",
+            }
+          );
+      }
 
       doc.end();
     } catch (err) {
