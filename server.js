@@ -104,8 +104,14 @@ try { speakerConfigMongoRouter = require('./routes/speaker-config-mongo'); } cat
 try { speakerConfigRouter = require('./routes/speakerConfig'); } catch (e) { speakerConfigRouter = null; }
 
 let awardeesRouter = null;
-try { awardeesRouter = require('./routes/awardees-mongo'); } catch (e) { try { awardeesRouter = require('./routes/awardees'); } catch (e2) { awardeesRouter = null; } }
-
+try { 
+  awardeesRouter = require('./routes/awardees');
+  console.log('✅ Loaded awardees router');
+} catch (e) { 
+  console.error('❌ Failed to load awardees router:', e.message);
+  console.error('   Full error:', e.stack);
+  awardeesRouter = null;
+}
 let awardeeConfigRouter = null;
 try { awardeeConfigRouter = require('./routes/awardee-config-mongo'); } catch (e) { try { awardeeConfigRouter = require('./routes/awardeeConfig'); } catch (e2) { awardeeConfigRouter = null; } }
 

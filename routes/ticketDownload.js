@@ -2,42 +2,160 @@ const express = require("express");
 const router = express.Router();
 const { ObjectId } = require("mongodb");
 const mongo = require("../utils/mongoClient");
-const { generateBadgePDF } = require("../utils/badgeGenerator"); // YOU must export this
 
-async function obtainDb() {
-  if (mongo.getDb) return await mongo.getDb();
-  return mongo.db;
+// Safe import for badgeGenerator
+let generateBadgePDF;
+try {
+  const badgeGen = require("../utils/badgeGenerator");
+  generateBadgePDF = badgeGen.generateBadgePDF || badgeGen;
+  if (typeof generateBadgePDF !== "function") {
+    throw new Error("generateBadgePDF is not a function");
+  }
+} catch (e) {
+  console.error("❌ Failed to load badgeGenerator:", e. message);
+  generateBadgePDF = null;
 }
 
-router.get("/:entity/:id", async (req, res) => {
+async function obtainDb() {
   try {
-    const { entity, id } = req.params;
-    const db = await obtainDb();
+    if (mongo.getDb) return await mongo.getDb();
+    return mongo.db;
+  } catch (e) {
+    console.error("[ticketDownload] DB error:", e.message);
+    return null;
+  }
+}
 
-    const allowed = ["visitors", "speakers", "exhibitors", "partners", "awardees"];
-    if (!allowed.includes(entity)) {
-      return res.status(400).send("Invalid ticket type");
+/**
+ * ✅ Changed to query params to match frontend/email usage
+ * 
+ * GET ? entity=visitors&id=xxxxx
+ */
+router.get("/", async (req, res) => {
+  try {
+    console.log("[ticketDownload] Request:", req.query);
+
+    const { entity, id } = req.query;
+
+    // Validate required params
+    if (!entity || !id) {
+      console.error("[ticketDownload] Missing params:", { entity, id });
+      return res.status(400).json({ 
+        error: "Missing required parameters",
+        required: ["entity", "id"],
+        received: { entity:  !!entity, id: !!id }
+      });
     }
 
-    const collection = db.collection(entity);
-    const doc = await collection.findOne({ _id: new ObjectId(id) });
+    // Safe collection mapping
+    const collectionMap = {
+      visitors: "visitors",
+      speakers: "speakers",
+      exhibitors: "exhibitors",
+      partners: "partners",
+      awardees: "awardees",
+    };
 
-    if (!doc) return res.status(404).send("Ticket not found");
+    const allowed = Object.keys(collectionMap);
+    if (!allowed.includes(entity)) {
+      console.error("[ticketDownload] Invalid entity:", entity);
+      return res.status(400).json({ 
+        error: "Invalid ticket type",
+        allowed,
+        received: entity
+      });
+    }
 
-    // 🔥 SERVER-SIDE PDF GENERATION
-    const pdfBuffer = await generateBadgePDF(entity, doc);
+    // Validate ObjectId BEFORE using it
+    if (!ObjectId. isValid(id)) {
+      console.error("[ticketDownload] Invalid ObjectId:", id);
+      return res.status(400).json({ 
+        error: "Invalid ticket ID format",
+        received: id
+      });
+    }
+
+    const db = await obtainDb();
+    if (!db) {
+      console.error("[ticketDownload] Database not available");
+      return res.status(500).json({ error: "Database not available" });
+    }
+
+    const collectionName = collectionMap[entity];
+    const collection = db. collection(collectionName);
+
+    console.log("[ticketDownload] Finding document:", { entity, id, collection:  collectionName });
+
+    let doc;
+    try {
+      doc = await collection.findOne({ _id: new ObjectId(id) });
+    } catch (dbErr) {
+      console.error("[ticketDownload] DB query error:", dbErr.message);
+      return res.status(500).json({ error: "Database query failed" });
+    }
+
+    if (!doc) {
+      console.error("[ticketDownload] Document not found:", { entity, id });
+      return res.status(404).json({ 
+        error: "Ticket not found",
+        entity,
+        id
+      });
+    }
+
+    console.log("[ticketDownload] Document found:", doc. ticket_code || doc._id);
+
+    // Check if badge generator is available
+    if (! generateBadgePDF) {
+      console.error("[ticketDownload] Badge generator not available");
+      return res.status(500).json({ error: "Badge generator not configured" });
+    }
+
+    // Generate PDF
+    console.log("[ticketDownload] Generating PDF...");
+    let pdfBuffer;
+    try {
+      pdfBuffer = await generateBadgePDF(entity, doc);
+    } catch (pdfErr) {
+      console.error("[ticketDownload] PDF generation error:", pdfErr.stack || pdfErr);
+      return res.status(500).json({ 
+        error: "Failed to generate badge PDF",
+        details: pdfErr.message
+      });
+    }
+
+    if (!pdfBuffer || !Buffer.isBuffer(pdfBuffer)) {
+      console.error("[ticketDownload] Invalid PDF buffer returned");
+      return res.status(500).json({ error: "Invalid PDF generated" });
+    }
+
+    console.log("[ticketDownload] ✅ PDF generated successfully, size:", pdfBuffer.length);
+
+    const filename = `RailTrans-${entity}-${doc. ticket_code || id}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=RailTrans-${entity}-${doc.ticket_code}.pdf`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
 
     res.send(pdfBuffer);
+    console.log("[ticketDownload] ✅ PDF sent successfully");
   } catch (err) {
-    console.error("[ticketDownload]", err);
-    res.status(500).send("Failed to generate ticket");
+    console.error("[ticketDownload] Unexpected error:", err.stack || err);
+    res.status(500).json({ 
+      error: "Failed to generate ticket",
+      message: err.message
+    });
   }
+});
+
+/**
+ * Also support old URL format for backward compatibility
+ * GET /:entity/:id
+ */
+router.get("/:entity/:id", async (req, res) => {
+  console.log("[ticketDownload] Legacy URL format, redirecting to query params");
+  const { entity, id } = req. params;
+  return res.redirect(`/api/tickets/download?entity=${entity}&id=${id}`);
 });
 
 module.exports = router;

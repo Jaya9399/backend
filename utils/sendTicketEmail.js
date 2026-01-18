@@ -1,7 +1,15 @@
-const { generateBadgePDF } = require("./badgeGenerator");
 const { buildTicketEmail } = require("./emailTemplate");
 const mailer = require("./mailer");
 const roleConfig = require("./emailRoleConfig");
+
+// Safe import for badgeGenerator (not used for attachment, but keep for compatibility)
+let generateBadgePDF;
+try {
+  const badgeGen = require("./badgeGenerator");
+  generateBadgePDF = badgeGen.generateBadgePDF || badgeGen;
+} catch (e) {
+  generateBadgePDF = null;
+}
 
 /**
  * Helper to fetch JSON from URL (works in Node.js)
@@ -9,26 +17,36 @@ const roleConfig = require("./emailRoleConfig");
 async function safeFetch(url) {
   try {
     let _fetch = typeof fetch !== "undefined" ? fetch : null;
-    if (!_fetch) {
+    if (! _fetch) {
       try {
         const nf = require("node-fetch");
-        _fetch = nf && nf.default ? nf.default : nf;
+        _fetch = nf && nf.default ? nf. default : nf;
       } catch (e) {
+        console.warn("[sendTicketEmail] node-fetch not available");
         return null;
       }
     }
+    
+    console.log("[sendTicketEmail] Fetching:", url);
     
     const res = await _fetch(url, {
       headers: {
         Accept: "application/json",
         "ngrok-skip-browser-warning":  "69420",
       },
+      timeout: 5000,
     });
     
-    if (!res. ok) return null;
-    return await res.json().catch(() => null);
+    if (!res.ok) {
+      console.warn("[sendTicketEmail] Fetch failed:", res.status, res. statusText);
+      return null;
+    }
+    
+    const data = await res.json();
+    console.log("[sendTicketEmail] ✅ Fetch successful");
+    return data;
   } catch (e) {
-    console.warn("[sendTicketEmail] fetch failed:", url, e. message);
+    console.warn("[sendTicketEmail] Fetch error:", e.message);
     return null;
   }
 }
@@ -39,8 +57,13 @@ async function safeFetch(url) {
 async function fetchEventDetails() {
   const apiBase = process.env.BACKEND_URL || process.env.API_BASE || "";
   
-  if (!apiBase || !/^https?:\/\//i.test(apiBase)) {
-    console.warn("[sendTicketEmail] BACKEND_URL not set - using fallback event details");
+  if (!apiBase) {
+    console.warn("[sendTicketEmail] ⚠️ BACKEND_URL not set in . env");
+    return null;
+  }
+
+  if (!/^https?:\/\//i.test(apiBase)) {
+    console.warn("[sendTicketEmail] ⚠️ BACKEND_URL must be absolute (http://...):", apiBase);
     return null;
   }
 
@@ -48,27 +71,24 @@ async function fetchEventDetails() {
   
   for (const path of paths) {
     const url = `${apiBase. replace(/\/$/, "")}${path}?cb=${Date.now()}`;
-    try {
-      const js = await safeFetch(url);
-      if (! js) continue;
-      
-      const val = js.value !== undefined ? js.value : js;
-      if (val && typeof val === "object" && Object.keys(val).length) {
-        console.log("[sendTicketEmail] Event details fetched from:", url);
-        return {
-          name: val.name || val.eventName || val.title || "",
-          dates: val.dates || val.date || val.eventDates || "",
-          time: val.time || val.startTime || val.eventTime || "",
-          venue: val.venue || val.location || val.eventVenue || "",
-          tagline: val.tagline || val.subtitle || "",
-        };
-      }
-    } catch (e) {
-      console.warn("[sendTicketEmail] Failed to fetch from", url);
-      continue;
+    const js = await safeFetch(url);
+    
+    if (! js) continue;
+    
+    const val = js.value !== undefined ? js.value : js;
+    if (val && typeof val === "object" && Object.keys(val).length) {
+      console.log("[sendTicketEmail] ✅ Event details:", val. name);
+      return {
+        name: val.name || val.eventName || val.title || "",
+        dates: val.dates || val.date || val.eventDates || "",
+        time: val.time || val.startTime || val.eventTime || "",
+        venue: val.venue || val.location || val.eventVenue || "",
+        tagline: val.tagline || val.subtitle || "",
+      };
     }
   }
   
+  console.warn("[sendTicketEmail] ⚠️ Could not fetch event details");
   return null;
 }
 
@@ -86,17 +106,14 @@ async function fetchAdminLogo() {
   
   for (const path of paths) {
     const url = `${apiBase.replace(/\/$/, "")}${path}?cb=${Date.now()}`;
-    try {
-      const js = await safeFetch(url);
-      if (!js) continue;
-      
-      if (js.logoUrl) return js.logoUrl;
-      if (js.logo_url) return js.logo_url;
-      if (js.url) return js.url;
-      if (typeof js === "string" && js.trim()) return js.trim();
-    } catch (e) {
-      continue;
-    }
+    const js = await safeFetch(url);
+    
+    if (!js) continue;
+    
+    if (js.logoUrl) return js.logoUrl;
+    if (js.logo_url) return js.logo_url;
+    if (js.url) return js.url;
+    if (typeof js === "string" && js.trim()) return js.trim();
   }
   
   return "";
@@ -118,92 +135,93 @@ module.exports = async function sendTicketEmail({
     throw new Error(`Unsupported entity for email: ${entity}`);
   }
 
-  if (! doc?.email) {
+  if (!doc?. email) {
     throw new Error("Recipient email missing");
   }
 
-  // ✅ FETCH EVENT DETAILS ONCE (not in email template)
+  console.log("[sendTicketEmail] 📧 Starting for:", entity, String(doc._id || doc.id));
+
+  // ✅ FETCH EVENT DETAILS
   let eventDetails = null;
   try {
     eventDetails = await fetchEventDetails();
   } catch (e) {
-    console.warn("[sendTicketEmail] Could not fetch event details:", e.message);
+    console.warn("[sendTicketEmail] Event details error:", e.message);
   }
 
-  // ✅ FETCH ADMIN LOGO ONCE
+  // ✅ FETCH ADMIN LOGO
   let logoUrl = "";
   try {
     logoUrl = await fetchAdminLogo();
   } catch (e) {
-    console.warn("[sendTicketEmail] Could not fetch admin logo:", e.message);
+    console.warn("[sendTicketEmail] Logo fetch error:", e.message);
   }
 
-  // Handle nested data structure (visitors store form data in doc.data)
+  // Handle nested data structure
   const getField = (field) => {
-    if (doc[field] !== undefined) {
-      return doc[field];
-    }
+    if (doc[field] !== undefined) return doc[field];
     return doc.data?.[field];
   };
 
-  // Normalize data for badge generator
-  const badgeData = {
-    ... doc,
-    name: getField("name") ?? doc.name,
-    company: getField("company") ?? doc.company,
-    ticket_code: doc.ticket_code ??  doc.data?.ticket_code,
-    txId: doc.txId ?? doc.data?.txId,
-    paid: doc.paid ?? doc.data?.paid,
-    amount: doc.amount ?? doc.data?.amount,
-    total: doc.total ?? doc.data?.total,
-    price: doc.price ?? doc.data?.price,
-  };
+  // Get backend and frontend URLs
+  const backendUrl = process.env.BACKEND_URL || process.env.API_BASE || "";
+  const frontendUrl = frontendBase || process.env.FRONTEND_BASE || "";
 
-  // ✅ NO PDF ATTACHMENT - badge only via download button
-  let pdfBase64 = null;
+  console.log("[sendTicketEmail] Backend URL:", backendUrl);
+  console.log("[sendTicketEmail] Frontend URL:", frontendUrl);
 
-  // Build email payload with fetched event details
+  if (!backendUrl || !/^https?:\/\//i.test(backendUrl)) {
+    console.error("[sendTicketEmail] ❌ BACKEND_URL not set!  Download button will NOT work!");
+    console.error("[sendTicketEmail] Add to .env: BACKEND_URL=http://localhost:5000");
+  }
+
+  // Build email payload
   const emailPayload = await buildTicketEmail({
-    frontendBase:  frontendBase || process.env.FRONTEND_BASE || "",
+    frontendBase:  frontendUrl,
     entity,
-    id:  String(doc._id),
-    name: getField("name") ?? doc.name,
+    id: String(doc._id || doc.id),
+    name: getField("name") ??  doc.name,
     company: getField("company") ?? doc.company,
-    ticket_category:  getField("ticket_category") ?? doc.ticket_category,
+    ticket_category: getField("ticket_category") ?? doc.ticket_category,
     logoUrl:  logoUrl || "",
     form:  {
-      ...(doc.data ?? doc),
+      ...(doc.data ??  doc),
       eventDetails, // ✅ Pass fetched event details
     },
     pdfBase64: null, // ✅ NO attachment
-    upgradeUrl: config. allowUpgrade ? undefined : "",
+    upgradeUrl: config.allowUpgrade ? undefined : "",
   });
 
   // Override subject if needed
   if (config.subjectPrefix) {
-    emailPayload.subject = `RailTrans Expo — ${config.subjectPrefix}`;
+    emailPayload. subject = `RailTrans Expo — ${config.subjectPrefix}`;
   }
 
+  console.log("[sendTicketEmail] 📨 Sending to:", doc.email);
+  console.log("[sendTicketEmail] Subject:", emailPayload.subject);
+
   const result = await mailer.sendMail({
-    to: doc. email,
+    to: doc.email,
     subject: emailPayload.subject,
     text: emailPayload.text,
     html: emailPayload.html,
-    attachments: emailPayload.attachments, // Will be empty array
+    attachments: [], // ✅ Always empty
   });
 
   // Return standardized result
   if (result && result.success) {
+    console.log("[sendTicketEmail] ✅ Email sent successfully");
     return {
-      success:  true,
-      info: result. info,
-      messageId: result.info?.messageId,
+      success: true,
+      info: result.info,
+      messageId: result.info?. messageId,
       dbRecordId: result.dbRecordId,
     };
   } else {
+    console. error("[sendTicketEmail] ❌ Email failed:", result?. error);
     return {
-      success: false,
-      error: result?.error || "Mail send failed",
+      success:  false,
+      error: result?. error || "Mail send failed",
       dbRecordId: result?.dbRecordId,
     };
   }
