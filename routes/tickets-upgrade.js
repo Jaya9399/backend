@@ -6,9 +6,6 @@ const sendTicketEmail = require("../utils/sendTicketEmail");
 
 console.log("🔥 tickets-upgrade.js LOADING.. .");
 
-/**
- * Allowed entity collections
- */
 const ALLOWED_ENTITIES = new Set([
   "speakers",
   "awardees",
@@ -17,12 +14,12 @@ const ALLOWED_ENTITIES = new Set([
   "visitors",
 ]);
 
-const API_BASE = (process.env.API_BASE || process.env. BACKEND_URL || "").replace(/\/$/, "");
+const API_BASE = (process.env.API_BASE || process.env.BACKEND_URL || "").replace(/\/$/, "");
 const FRONTEND_BASE = (process.env.FRONTEND_BASE || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
 
 async function obtainDb() {
   if (!mongo) return null;
-  if (typeof mongo. getDb === "function") return await mongo.getDb();
+  if (typeof mongo.getDb === "function") return await mongo.getDb();
   if (mongo.db) return mongo.db;
   return null;
 }
@@ -53,14 +50,14 @@ function normalizeEmail(e) {
  *  - email: string (for verification)
  *  - txId: string (optional, if payment already completed)
  *  - method: string (optional:  "online", "manual", "free")
+ *  - couponCode: string (optional, coupon code applied by user)
  */
 router.post("/", async (req, res) => {
   try {
     console.log("[tickets-upgrade] POST request:", req.body);
 
-    const { entity_type, entity_id, new_category, amount = 0, email, txId, method = "online" } = req.body || {};
+    const { entity_type, entity_id, new_category, amount = 0, email, txId, method = "online", couponCode } = req.body || {};
 
-    // Validation
     if (!entity_type || !entity_id || !new_category) {
       return res.status(400).json({ 
         success: false, 
@@ -92,7 +89,7 @@ router.post("/", async (req, res) => {
     // Fetch entity document
     let entityRow = null;
     try {
-      const q = ObjectId. isValid(targetIdRaw) 
+      const q = ObjectId.isValid(targetIdRaw) 
         ? { _id: new ObjectId(targetIdRaw) } 
         : { _id: targetIdRaw };
       entityRow = await entityCol.findOne(q);
@@ -111,16 +108,16 @@ router.post("/", async (req, res) => {
     const storedEmail = normalizeEmail(
       entityRow.email || 
       entityRow.contactEmail || 
-      entityRow. data?.email || 
+      entityRow.data?.email || 
       ""
     );
 
     const providedEmail = email ?  normalizeEmail(email) : "";
 
-    if (! storedEmail) {
+    if (!storedEmail) {
       return res.status(403).json({
         success: false,
-        error: "Entity has no verified email on record.  Upgrade denied.",
+        error: "Entity has no verified email on record. Upgrade denied.",
       });
     }
 
@@ -140,7 +137,8 @@ router.post("/", async (req, res) => {
       new_category, 
       amountNum, 
       method,
-      txId 
+      txId,
+      couponCode: couponCode || null
     });
 
     // PAYMENT PATH:  amount > 0 and no txId yet
@@ -155,7 +153,8 @@ router.post("/", async (req, res) => {
         metadata: { 
           entity_type: entityType, 
           entity_id:  targetIdRaw,
-          new_category 
+          new_category,
+          couponCode: couponCode || undefined // meta supports coupon for easier later validation
         },
         customer: { email: emailToUse },
       };
@@ -180,18 +179,18 @@ router.post("/", async (req, res) => {
 
         console.log("[tickets-upgrade] Payment response:", js);
 
-        if (!r.ok || !js. success) {
+        if (!r.ok || !js.success) {
           return res.status(502).json({ 
             success: false, 
             error: js.error || "Failed to create payment order", 
-            raw:  js 
+            raw: js 
           });
         }
 
         return res.json({ 
           success: true, 
           payment_required: true,
-          checkoutUrl: js. checkoutUrl || js.checkout_url || js.raw?. checkout_url,
+          checkoutUrl: js.checkoutUrl || js.checkout_url || js.raw?.checkout_url,
           order:  js 
         });
       } catch (e) {
@@ -203,21 +202,46 @@ router.post("/", async (req, res) => {
       }
     }
 
-    // ZERO-AMOUNT OR PAYMENT COMPLETED PATH:  apply upgrade
-    console.log("[tickets-upgrade] Applying upgrade immediately...");
-
+    // ATOMIC: Upgrade & consume coupon
     const ticketsCol = db.collection("tickets");
-
-    // Upsert ticket
     let ticketDoc = null;
+
+    // -------- Coupon Validate & Burn (if supplied) --------
+    if (couponCode) {
+      const couponCol = db.collection("coupons");
+      const coupon = await couponCol.findOneAndUpdate(
+        { code: String(couponCode).trim().toUpperCase(), used: { $ne: true } },
+        { $set: { used: true, used_at: new Date(), used_by: emailToUse || targetIdRaw } },
+        { returnDocument: "after" }
+      );
+      if (!coupon.value) {
+        return res.status(400).json({
+          success: false,
+          error: "Coupon invalid or already used. Please try a different code."
+        });
+      }
+      // Log coupon use
+      try {
+        await db.collection("coupon_logs").insertOne({
+          type: "use_on_upgrade",
+          code: String(couponCode).trim().toUpperCase(),
+          entity_type,
+          entity_id: targetIdRaw,
+          upgradedAt: new Date(),
+          used_by: emailToUse || targetIdRaw
+        });
+      } catch {}
+    }
+
+    // -------- Upgrade logic (category/ticket update) --------
     try {
-      const filter = { entity_type:  entityType, entity_id: targetIdRaw };
+      const filter = { entity_type: entityType, entity_id: targetIdRaw };
       const existingTicket = await ticketsCol.findOne(filter);
       let ticket_code = existingTicket?.ticket_code || generateTicketCode();
 
       const update = {
         $set: {
-          entity_type:  entityType,
+          entity_type: entityType,
           entity_id: targetIdRaw,
           name: entityRow.name || entityRow.fullName || entityRow.company || null,
           email: emailToUse || null,
@@ -238,7 +262,7 @@ router.post("/", async (req, res) => {
         },
       };
 
-      const result = await ticketsCol. findOneAndUpdate(
+      const result = await ticketsCol.findOneAndUpdate(
         filter, 
         update, 
         { upsert: true, returnDocument: "after" }
@@ -247,14 +271,13 @@ router.post("/", async (req, res) => {
       ticketDoc = result.value;
 
       if (!ticketDoc) {
-        // Fallback: insert new
         const finalCode = generateTicketCode();
         const insertRes = await ticketsCol.insertOne({
           ticket_code: finalCode,
-          entity_type:  entityType,
+          entity_type: entityType,
           entity_id: targetIdRaw,
-          name: entityRow.name || entityRow.fullName || entityRow. company || null,
-          email:  emailToUse || null,
+          name: entityRow.name || entityRow.fullName || entityRow.company || null,
+          email: emailToUse || null,
           company: entityRow.company || null,
           category: new_category,
           txId: txId || null,
@@ -273,8 +296,8 @@ router.post("/", async (req, res) => {
       console.error("[tickets-upgrade] Ticket upsert failed:", e);
     }
 
-    const finalTicketCode = ticketDoc?. ticket_code || 
-      entityRow?. ticket_code || 
+    const finalTicketCode = ticketDoc?.ticket_code || 
+      entityRow?.ticket_code || 
       entityRow?.code || 
       null;
 
@@ -309,7 +332,7 @@ router.post("/", async (req, res) => {
     } catch (e) {
       console.error("[tickets-upgrade] Failed to fetch updated entity:", e);
       updatedEntity = {
-        ... entityRow,
+        ...entityRow,
         ticket_category: new_category,
         ticket_code: finalTicketCode,
         upgradedAt: new Date()
@@ -335,33 +358,23 @@ router.post("/", async (req, res) => {
 
         if (emailResult && emailResult.success) {
           console.log("[tickets-upgrade] ✅ Ticket email sent successfully");
-          
-          // Mark email as sent in entity
           try {
             const q = ObjectId.isValid(targetIdRaw) 
               ? { _id: new ObjectId(targetIdRaw) } 
               : { _id: targetIdRaw };
             await entityCol.updateOne(q, { 
-              $set: { 
-                ticket_email_sent_at: new Date(),
-                last_email_type: 'upgrade_confirmation'
-              },
-              $unset: { ticket_email_failed:  "" }
+              $set: { ticket_email_sent_at: new Date(), last_email_type: 'upgrade_confirmation' },
+              $unset: { ticket_email_failed: "" }
             });
           } catch {}
         } else {
-          console.error("[tickets-upgrade] ❌ Ticket email failed:", emailResult?. error);
-          
-          // Mark email as failed
+          console.error("[tickets-upgrade] ❌ Ticket email failed:", emailResult?.error);
           try {
             const q = ObjectId.isValid(targetIdRaw) 
               ? { _id: new ObjectId(targetIdRaw) } 
               : { _id: targetIdRaw };
-            await entityCol. updateOne(q, { 
-              $set: { 
-                ticket_email_failed: true,
-                ticket_email_failed_at: new Date()
-              }
+            await entityCol.updateOne(q, { 
+              $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() }
             });
           } catch {}
         }
@@ -374,19 +387,20 @@ router.post("/", async (req, res) => {
 
     return res.json({
       success: true,
-      upgraded:  true,
-      entity_type:  entityType,
+      upgraded: true,
+      entity_type: entityType,
       entity_id: targetIdRaw,
       new_category,
       ticket_code: finalTicketCode,
-      ticket:  ticketDoc || undefined,
-      message: "Upgrade successful!  Check your email for your updated ticket with badge download link."
+      ticket: ticketDoc || undefined,
+      couponUsed: couponCode || undefined,
+      message: "Upgrade successful! Check your email for your updated ticket with badge download link."
     });
   } catch (err) {
-    console.error("[tickets-upgrade] Error:", err. stack || err);
+    console.error("[tickets-upgrade] Error:", err.stack || err);
     return res.status(500).json({ 
       success: false, 
-      error: String(err. message || err) 
+      error: String(err.message || err) 
     });
   }
 });
