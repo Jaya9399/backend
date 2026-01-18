@@ -5,11 +5,30 @@ const { ObjectId } = require("mongodb");
 const sendTicketEmail = require("../utils/sendTicketEmail"); // centralized email + badge sender
 
 router.use(express.json({ limit: "6mb" }));
+// OTP verification helper (shared global store from otp.js)
+function checkOtpToken(role, email, token) {
+  if (!role || !email || !token) return false;
+
+  const store = global._otpVerifiedStore;
+  if (!store) return false;
+
+  const key = `verified::${role}::${email.toLowerCase()}`;
+  const info = store.get(key);
+
+  if (!info || info.token !== token) return false;
+  if (info.expires < Date.now()) {
+    store.delete(key);
+    return false;
+  }
+
+  store.delete(key); // ✅ single-use
+  return true;
+}
 
 async function obtainDb() {
   try {
     if (!mongo) return null;
-    if (typeof mongo. getDb === "function") return await mongo.getDb();
+    if (typeof mongo.getDb === "function") return await mongo.getDb();
     if (mongo.db) return mongo.db;
     return null;
   } catch {
@@ -40,7 +59,7 @@ router.get("/", async (req, res) => {
     const rows = await db.collection("visitors").find({}).sort({ createdAt: -1 }).toArray();
     return res.json({ success: true, data: rows });
   } catch (err) {
-    console.error("[visitors] list error:", err && (err. stack || err));
+    console.error("[visitors] list error:", err && (err.stack || err));
     return res.status(500).json({ success: false, error: "Failed to list visitors" });
   }
 });
@@ -50,7 +69,7 @@ router.get("/", async (req, res) => {
  *
  * Accept ObjectId or ticket_code
  */
-router. get("/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
@@ -86,11 +105,28 @@ router.post("/", async (req, res) => {
 
   try {
     const body = req.body || {};
-    const form = body. form || body || {};
+    const form = body.form || body || {};
 
     const email = String(form.email || "").trim();
     if (!isEmailLike(email)) {
       return res.status(400).json({ success: false, message: "Valid email required" });
+    }
+
+    // 🔐 OTP verification (REQUIRED)
+    const verificationToken =
+      body.verificationToken || form.verificationToken;
+
+    if (
+      !checkOtpToken(
+        "visitor",
+        email,
+        verificationToken
+      )
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "Email not verified via OTP",
+      });
     }
 
     // Generate unique ticket_code (collision-safe)
@@ -118,14 +154,14 @@ router.post("/", async (req, res) => {
       data: form,
       createdAt: new Date(),
       updatedAt: new Date(),
-      
+
       // ✅ Track admin creation but DON'T skip email
       added_by_admin: !!body.added_by_admin,
       admin_created_at: body.added_by_admin ? new Date(body.admin_created_at || Date.now()) : undefined,
     };
 
     const r = await coll.insertOne(doc);
-    const insertedId = r.insertedId ?  String(r.insertedId) : null;
+    const insertedId = r.insertedId ? String(r.insertedId) : null;
 
     // ✅ ALWAYS respond immediately and queue email (NO skip logic)
     res.json({
@@ -139,12 +175,12 @@ router.post("/", async (req, res) => {
     (async () => {
       try {
         const savedDoc = await coll.findOne({ _id: r.insertedId });
-        if (! savedDoc) {
-          console. warn("[visitors] saved but cannot retrieve doc for email");
+        if (!savedDoc) {
+          console.warn("[visitors] saved but cannot retrieve doc for email");
           return;
         }
 
-        if (! isEmailLike(savedDoc.email)) {
+        if (!isEmailLike(savedDoc.email)) {
           console.warn("[visitors] saved but no valid email; skipping mail");
           return;
         }
@@ -158,10 +194,10 @@ router.post("/", async (req, res) => {
         if (result && result.success) {
           try {
             await coll.updateOne(
-              { _id:  r.insertedId }, 
-              { 
-                $set: { email_sent_at: new Date() }, 
-                $unset: { email_failed:  "" } 
+              { _id: r.insertedId },
+              {
+                $set: { email_sent_at: new Date() },
+                $unset: { email_failed: "" }
               }
             );
             console.log("[visitors] email sent to", savedDoc.email);
@@ -169,12 +205,12 @@ router.post("/", async (req, res) => {
             console.warn("[visitors] email sent but failed to update DB flags:", upErr && (upErr.message || upErr));
           }
         } else {
-          console.error("[visitors] email failed:", result && result.error ?  result.error : result);
+          console.error("[visitors] email failed:", result && result.error ? result.error : result);
           try {
             await coll.updateOne(
-              { _id:  r.insertedId }, 
-              { 
-                $set:  { email_failed: true, email_failed_at: new Date() } 
+              { _id: r.insertedId },
+              {
+                $set: { email_failed: true, email_failed_at: new Date() }
               }
             );
           } catch (upErr) { /* ignore */ }
@@ -184,9 +220,9 @@ router.post("/", async (req, res) => {
         try {
           if (r && r.insertedId) {
             await coll.updateOne(
-              { _id: r. insertedId }, 
-              { 
-                $set: { email_failed: true, email_failed_at: new Date() } 
+              { _id: r.insertedId },
+              {
+                $set: { email_failed: true, email_failed_at: new Date() }
               }
             );
           }
@@ -214,7 +250,7 @@ router.put("/:id", async (req, res) => {
   if (!oid) return res.status(400).json({ success: false, error: "Invalid id" });
 
   try {
-    const fields = { ...(req. body || {}) };
+    const fields = { ...(req.body || {}) };
     delete fields._id;
     delete fields.id;
 
@@ -245,7 +281,7 @@ router.put("/:id", async (req, res) => {
  *
  * The handler here updates email_sent_at/email_failed flags based on that result.
  */
-router. post("/:id/resend-email", async (req, res) => {
+router.post("/:id/resend-email", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
@@ -256,11 +292,11 @@ router. post("/:id/resend-email", async (req, res) => {
   const doc = await coll.findOne({ _id: oid });
   if (!doc) return res.status(404).json({ success: false, error: "Visitor not found" });
 
-  if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error:  "Invalid email" });
+  if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: "Invalid email" });
 
   try {
     const result = await sendTicketEmail({
-      entity:  "visitors",
+      entity: "visitors",
       record: doc,
     });
 
@@ -272,10 +308,10 @@ router. post("/:id/resend-email", async (req, res) => {
     // send failed
     await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } });
     console.error("[visitors] resend-email failed result:", result);
-    return res.status(500).json({ success: false, error:  result && result.error ? result. error : "Failed to send email" });
+    return res.status(500).json({ success: false, error: result && result.error ? result.error : "Failed to send email" });
   } catch (err) {
     console.error("[visitors] resend mail error:", err && (err.stack || err));
-    await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }).catch(() => {});
+    await coll.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }).catch(() => { });
     return res.status(500).json({ success: false, error: "Mail send failed" });
   }
 });
@@ -287,7 +323,7 @@ router.delete("/:id", async (req, res) => {
   const db = await obtainDb();
   if (!db) return res.status(500).json({ success: false, error: "DB not ready" });
 
-  const id = req. params.id;
+  const id = req.params.id;
   let result = null;
 
   try {

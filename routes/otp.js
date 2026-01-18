@@ -19,6 +19,11 @@ const nodemailer = require("nodemailer");
 const mongoClient = require("../utils/mongoClient"); // uses getDb() or .db
 
 const router = express.Router();
+const crypto = require("crypto");
+
+// Global store so it survives hot reloads in dev
+const otpVerifiedStore =
+  global._otpVerifiedStore || (global._otpVerifiedStore = new Map());
 
 /* ---------- simple mongo helper ---------- */
 async function obtainDb() {
@@ -325,37 +330,85 @@ router.post("/send", express.json({ limit: "2mb" }), async (req, res) => {
 router.post("/verify", express.json({ limit: "2mb" }), async (req, res) => {
   try {
     const { value, otp, registrationType } = req.body || {};
-    if (!isValidEmail(value)) return res.status(400).json({ success: false, error: "Provide a valid email" });
-    if (!registrationType || typeof registrationType !== "string") return res.status(400).json({ success: false, error: "registrationType required" });
+    if (!isValidEmail(value)) {
+      return res.status(400).json({ success: false, error: "Provide a valid email" });
+    }
+    if (!registrationType || typeof registrationType !== "string") {
+      return res.status(400).json({ success: false, error: "registrationType required" });
+    }
 
     const emailKey = normalizeEmail(value);
     const regType = String(registrationType).trim();
     const key = `${regType}::${emailKey}`;
     const rec = otpStore.get(key);
+
     if (!rec) return res.json({ success: false, error: "OTP not found or expired" });
 
-    if (rec.expires < Date.now()) { otpStore.delete(key); return res.json({ success: false, error: "OTP expired" }); }
-    if ((rec.attempts || 0) >= MAX_VERIFY_ATTEMPTS) { otpStore.delete(key); return res.status(429).json({ success: false, error: "Too many attempts" }); }
+    if (rec.expires < Date.now()) {
+      otpStore.delete(key);
+      return res.json({ success: false, error: "OTP expired" });
+    }
+
+    if ((rec.attempts || 0) >= MAX_VERIFY_ATTEMPTS) {
+      otpStore.delete(key);
+      return res.status(429).json({ success: false, error: "Too many attempts" });
+    }
 
     const input = String(otp || "").trim();
-    if (input.length !== 6 || rec.otp !== input) { rec.attempts = (rec.attempts || 0) + 1; otpStore.set(key, rec); return res.json({ success: false, error: "Incorrect OTP" }); }
+    if (input.length !== 6 || rec.otp !== input) {
+      rec.attempts = (rec.attempts || 0) + 1;
+      otpStore.set(key, rec);
+      return res.json({ success: false, error: "Incorrect OTP" });
+    }
 
-    // consume
+    // ✅ consume OTP
     otpStore.delete(key);
 
-    // after verification, check if existing registrant
+    // ✅ generate verification token
+    const verificationToken = crypto.randomUUID();
+
+    otpVerifiedStore.set(`verified::${regType}::${emailKey}`, {
+      token: verificationToken,
+      expires: Date.now() + OTP_TTL_MS,
+    });
+
+    setTimeout(() => {
+      const k = `verified::${regType}::${emailKey}`;
+      const r = otpVerifiedStore.get(k);
+      if (r && r.expires < Date.now()) otpVerifiedStore.delete(k);
+    }, OTP_TTL_MS).unref();
+
+    // ✅ DB lookup (INNER TRY)
     try {
       const existing = await findExistingByEmailMongo(emailKey, regType);
-      if (existing) return res.json({ success: true, email: emailKey, registrationType: regType, existing });
-      return res.json({ success: true, email: emailKey, registrationType: regType });
+
+      if (existing) {
+        return res.json({
+          success: true,
+          email: emailKey,
+          registrationType: regType,
+          verificationToken,
+          existing,
+        });
+      }
+
+      return res.json({
+        success: true,
+        email: emailKey,
+        registrationType: regType,
+        verificationToken,
+      });
     } catch (dbErr) {
-      console.error("[otp/verify] DB error:", dbErr && (dbErr.stack || dbErr.message || dbErr));
+      console.error("[otp/verify] DB error:", dbErr);
       return res.status(500).json({ success: false, error: "Server error during verification" });
     }
+
   } catch (err) {
-    console.error("[otp/verify] unexpected:", err && (err.stack || err.message || err));
+    // ✅ OUTER CATCH (THIS WAS MISSING)
+    console.error("[otp/verify] unexpected:", err);
     return res.status(500).json({ success: false, error: "Server error" });
   }
 });
+
 
 module.exports = router;

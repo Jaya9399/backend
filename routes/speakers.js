@@ -6,7 +6,26 @@ const { sendMail } = require('../utils/mailer'); // for ACK email
 const sendTicketEmail = require('../utils/sendTicketEmail'); // for ticket email with badge
 
 // parse JSON bodies for routes in this router
-router.use(express. json({ limit: '6mb' }));
+router.use(express.json({ limit: '6mb' }));
+// OTP verification helper (shared global store from otp.js)
+function checkOtpToken(role, email, token) {
+  if (!role || !email || !token) return false;
+
+  const store = global._otpVerifiedStore;
+  if (!store) return false;
+
+  const key = `verified::${role}::${email.toLowerCase()}`;
+  const info = store.get(key);
+
+  if (!info || info.token !== token) return false;
+  if (info.expires < Date.now()) {
+    store.delete(key);
+    return false;
+  }
+
+  store.delete(key); // single-use
+  return true;
+}
 
 function generateTicketCode() {
   return String(Math.floor(10000 + Math.random() * 90000));
@@ -41,7 +60,7 @@ function docToOutput(doc) {
  */
 function buildSpeakerAckEmail({ name = '' } = {}) {
   const subject = 'Speaker Registration Received — RailTrans Expo';
-  
+
   const text = `Hello ${name || 'Speaker'},
 
 Thank you for showing your interest and choosing to be a part of RailTrans Expo. We truly appreciate your decision to connect with us and share your expertise at our prestigious platform.
@@ -63,7 +82,7 @@ support@railtransexpo.com
 <a href="mailto:support@railtransexpo.com">support@railtransexpo.com</a>
 </p>`;
 
-  const from = process.env. MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>';
+  const from = process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>';
   return { subject, text, html, from };
 }
 
@@ -80,12 +99,32 @@ router.post('/', async (req, res) => {
     db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
-    const payload = { ...(req. body || {}) };
+    const payload = { ...(req.body || {}) };
 
     // normalize slots if provided as JSON string
     if (typeof payload.slots === 'string') {
       try { payload.slots = JSON.parse(payload.slots); } catch { /* keep as string */ }
     }
+    const email = (payload.email || '').toString().trim();
+    if (!isEmailLike(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Valid email required',
+      });
+    }
+
+    // 🔐 OTP verification (skip for admin)
+    if (!payload.added_by_admin) {
+      const verificationToken = payload.verificationToken;
+
+      if (!checkOtpToken('speaker', email, verificationToken)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Email not verified via OTP',
+        });
+      }
+    }
+
 
     const doc = {
       name: payload.name || payload.fullName || '',
@@ -99,7 +138,7 @@ router.post('/', async (req, res) => {
       txId: payload.txId || payload.txid || null,
       other_details: payload.other_details || payload.otherDetails || '',
       created_at: new Date(),
-      registered_at: payload.registered_at ?  new Date(payload.registered_at) : new Date(),
+      registered_at: payload.registered_at ? new Date(payload.registered_at) : new Date(),
       added_by_admin: !!payload.added_by_admin,
       admin_created_at: payload.added_by_admin ? new Date(payload.admin_created_at || Date.now()) : undefined,
     };
@@ -109,7 +148,7 @@ router.post('/', async (req, res) => {
 
     col = db.collection('speakers');
     r = await col.insertOne(doc);
-    const insertedId = r.insertedId ?  String(r.insertedId) : null;
+    const insertedId = r.insertedId ? String(r.insertedId) : null;
 
     // ensure ticket_code persisted
     if (doc.ticket_code && r && r.insertedId) {
@@ -119,7 +158,7 @@ router.post('/', async (req, res) => {
     const savedDoc = await col.findOne({ _id: r.insertedId });
     const output = docToOutput(savedDoc);
 
- 
+
     // Respond immediately and perform background ACK email (NO ticket, NO badge)
     res.json({
       success: true,
@@ -132,13 +171,13 @@ router.post('/', async (req, res) => {
     // Background:  send simple ACK email (NO ticket, NO badge)
     (async () => {
       try {
-        if (! isEmailLike(doc.email)) {
+        if (!isEmailLike(doc.email)) {
           console.warn('[speakers] saved but no valid email; skipping ack mail');
           return;
         }
 
         const mail = buildSpeakerAckEmail({ name: doc.name });
-        
+
         try {
           await sendMail({
             to: doc.email,
@@ -179,35 +218,35 @@ router.post('/', async (req, res) => {
 router.post('/:id/resend-email', async (req, res) => {
   try {
     const db = await obtainDb();
-    if (!db) return res.status(500).json({ success: false, error:  'database not available' });
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
     let oid;
-    try { oid = new ObjectId(req. params.id); } catch { return res.status(400).json({ success: false, error: 'invalid id' }); }
+    try { oid = new ObjectId(req.params.id); } catch { return res.status(400).json({ success: false, error: 'invalid id' }); }
 
     const col = db.collection('speakers');
     const doc = await col.findOne({ _id: oid });
     if (!doc) return res.status(404).json({ success: false, error: 'Speaker not found' });
-    if (! isEmailLike(doc.email)) return res.status(400).json({ success: false, error: 'No valid email found for speaker' });
+    if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: 'No valid email found for speaker' });
 
     const mail = buildSpeakerAckEmail({ name: doc.name });
 
     try {
       await sendMail({
-        to: doc. email,
-        subject: mail. subject,
-        text: mail. text,
-        html: mail. html,
-        from: mail. from,
+        to: doc.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        from: mail.from,
       });
-      await col.updateOne({ _id: oid }, { $set: { email_sent_at:  new Date() }, $unset: { email_failed: "" } });
+      await col.updateOne({ _id: oid }, { $set: { email_sent_at: new Date() }, $unset: { email_failed: "" } });
       return res.json({ success: true, mail: { ok: true } });
     } catch (e) {
       console.error('[speakers] resend ack failed:', e && (e.message || e));
-      try { await col.updateOne({ _id: oid }, { $set:  { email_failed: true, email_failed_at: new Date() } }); } catch {}
+      try { await col.updateOne({ _id: oid }, { $set: { email_failed: true, email_failed_at: new Date() } }); } catch { }
       return res.status(500).json({ success: false, error: 'Failed to resend ack email' });
     }
   } catch (err) {
-    console.error('POST /api/speakers/:id/resend-email error:', err && (err. stack || err));
+    console.error('POST /api/speakers/:id/resend-email error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to resend ack email' });
   }
 });
@@ -232,23 +271,23 @@ router.post('/:id/send-ticket', async (req, res) => {
     if (!isEmailLike(doc.email)) return res.status(400).json({ success: false, error: 'No valid email found for speaker' });
 
     try {
-      const result = await sendTicketEmail({ 
-        entity: 'speakers', 
-        record: doc, 
-        options:  { forceSend: true, includeBadge: true } 
+      const result = await sendTicketEmail({
+        entity: 'speakers',
+        record: doc,
+        options: { forceSend: true, includeBadge: true }
       });
 
       if (result && result.success) {
         await col.updateOne({ _id: oid }, { $set: { ticket_email_sent_at: new Date() }, $unset: { ticket_email_failed: "" } });
-        return res.json({ success: true, mail: { ok:  true, info: result.info || null } });
+        return res.json({ success: true, mail: { ok: true, info: result.info || null } });
       } else {
         await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } });
-        return res.status(500).json({ success: false, mail: { ok: false, error:  result && result.error ?  result.error : 'ticket_send_failed' } });
+        return res.status(500).json({ success: false, mail: { ok: false, error: result && result.error ? result.error : 'ticket_send_failed' } });
       }
     } catch (e) {
       console.error('[speakers] send-ticket failed:', e && (e.stack || e));
-      try { await col.updateOne({ _id: oid }, { $set: { ticket_email_failed:  true, ticket_email_failed_at: new Date() } }); } catch {}
-      return res. status(500).json({ success: false, error: 'Failed to send ticket email' });
+      try { await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } }); } catch { }
+      return res.status(500).json({ success: false, error: 'Failed to send ticket email' });
     }
   } catch (err) {
     console.error('POST /api/speakers/:id/send-ticket error:', err && (err.stack || err));
@@ -267,7 +306,7 @@ router.get('/', async (req, res) => {
     const col = db.collection('speakers');
     const cursor = col.find({}).sort({ created_at: -1 }).limit(1000);
     const rows = await cursor.toArray();
-    return res.json(rows. map(docToOutput));
+    return res.json(rows.map(docToOutput));
   } catch (err) {
     console.error('GET /api/speakers (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ error: 'Failed to fetch speakers' });
@@ -343,7 +382,7 @@ router.put('/:id', async (req, res) => {
     try { oid = new ObjectId(req.params.id); } catch { return res.status(400).json({ success: false, error: 'invalid id' }); }
 
     const fields = { ...(req.body || {}) };
-    delete fields. id;
+    delete fields.id;
     delete fields._id;
 
     if (Object.keys(fields).length === 0) return res.status(400).json({ success: false, error: 'No fields to update' });
@@ -352,8 +391,8 @@ router.put('/:id', async (req, res) => {
     const updateData = { ...fields, updated_at: new Date() };
 
     const col = db.collection('speakers');
-    const r = await col.updateOne({ _id: oid }, { $set:  updateData });
-    if (! r.matchedCount) return res.status(404).json({ success: false, error: 'Speaker not found' });
+    const r = await col.updateOne({ _id: oid }, { $set: updateData });
+    if (!r.matchedCount) return res.status(404).json({ success: false, error: 'Speaker not found' });
 
     const saved = await col.findOne({ _id: oid });
     const out = docToOutput(saved);

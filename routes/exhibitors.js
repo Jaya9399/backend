@@ -7,6 +7,25 @@ const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized tick
 
 // parse JSON bodies for all routes in this router
 router.use(express.json({ limit: '5mb' }));
+// OTP verification helper (shared global store from otp.js)
+function checkOtpToken(role, email, token) {
+  if (!role || !email || !token) return false;
+
+  const store = global._otpVerifiedStore;
+  if (!store) return false;
+
+  const key = `verified::${role}::${email.toLowerCase()}`;
+  const info = store.get(key);
+
+  if (!info || info.token !== token) return false;
+  if (info.expires < Date.now()) {
+    store.delete(key);
+    return false;
+  }
+
+  store.delete(key); // single-use
+  return true;
+}
 
 async function obtainDb() {
   if (!mongo) return null;
@@ -89,20 +108,40 @@ router.post('/', async (req, res) => {
   try {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
-    const col = db. collection('exhibitors');
+    const col = db.collection('exhibitors');
 
     const body = req.body || {};
-    console.info('[exhibitors] create payload keys:', Object.keys(body).length ?  Object.keys(body) : '(empty)');
+    // 🔐 OTP verification (skip if admin-created)
+    if (!body.added_by_admin) {
+      const email = (body.email || '').toString().trim();
+
+      if (!isEmailLike(email)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid email required for OTP verification',
+        });
+      }
+
+      const verificationToken = body.verificationToken;
+      if (!checkOtpToken('exhibitor', email, verificationToken)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Email not verified via OTP',
+        });
+      }
+    }
+
+    console.info('[exhibitors] create payload keys:', Object.keys(body).length ? Object.keys(body) : '(empty)');
 
     const pick = (keys = []) => {
       for (const k of keys) {
-        if (Object.prototype.hasOwnProperty. call(body, k) && body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') {
+        if (Object.prototype.hasOwnProperty.call(body, k) && body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') {
           return String(body[k]).trim();
         }
       }
       for (const bk of Object.keys(body)) {
         for (const k of keys) {
-          if (bk. toLowerCase() === String(k).toLowerCase() && body[bk] !== undefined && body[bk] !== null && String(body[bk]).trim() !== '') {
+          if (bk.toLowerCase() === String(k).toLowerCase() && body[bk] !== undefined && body[bk] !== null && String(body[bk]).trim() !== '') {
             return String(body[bk]).trim();
           }
         }
@@ -134,7 +173,7 @@ router.post('/', async (req, res) => {
 
     const doc = {};
     for (const [inputKey, docKey] of Object.entries(FIELD_MAP)) {
-      const val = (body[inputKey] !== undefined) ? body[inputKey] : (body[inputKey. toLowerCase()] !== undefined ? body[inputKey.toLowerCase()] : undefined);
+      const val = (body[inputKey] !== undefined) ? body[inputKey] : (body[inputKey.toLowerCase()] !== undefined ? body[inputKey.toLowerCase()] : undefined);
       if (val !== undefined && val !== null && String(val).trim() !== '') {
         doc[docKey] = (typeof val === 'object') ? JSON.stringify(val) : String(val).trim();
       }
@@ -145,30 +184,30 @@ router.post('/', async (req, res) => {
 
     doc.added_by_admin = !!body.added_by_admin;
     if (doc.added_by_admin) {
-      doc.admin_created_at = body.admin_created_at ?  new Date(body.admin_created_at) : new Date();
+      doc.admin_created_at = body.admin_created_at ? new Date(body.admin_created_at) : new Date();
     }
 
     doc.status = 'pending';
-    doc. created_at = new Date();
+    doc.created_at = new Date();
     doc.updated_at = new Date();
 
     const insertRes = await col.insertOne(doc);
     const insertedId = insertRes && insertRes.insertedId ? String(insertRes.insertedId) : null;
 
     // ✅ ALWAYS respond immediately and queue email (NO skip logic)
-    res.status(201).json({ 
-      success: true, 
-      insertedId, 
-      id: insertedId, 
+    res.status(201).json({
+      success: true,
+      insertedId,
+      id: insertedId,
       mail: { queued: true } // ✅ Email queued regardless of added_by_admin
     });
 
     // Background: send default ACK email (NO ticket, NO badge) and notify admins
     (async () => {
       try {
-        if (! insertedId) return;
+        if (!insertedId) return;
         const saved = await col.findOne({ _id: toObjectId(insertedId) });
-        
+
         if (!saved) {
           console.warn('[exhibitors] saved but cannot retrieve doc for email');
           return;
@@ -194,8 +233,8 @@ router.post('/', async (req, res) => {
         // Admin notifications - send for ALL records (add flag to subject if admin-created)
         const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
         const adminList = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-        if (adminList. length) {
-          const subject = `New exhibitor registration — ID: ${insertedId}${doc. added_by_admin ? ' (Admin Created)' : ''}`;
+        if (adminList.length) {
+          const subject = `New exhibitor registration — ID: ${insertedId}${doc.added_by_admin ? ' (Admin Created)' : ''}`;
           const html = `<p>New exhibitor registered. </p><pre>${JSON.stringify(saved || body, null, 2)}</pre>`;
           const text = `New exhibitor\n${JSON.stringify(saved || body, null, 2)}`;
           await Promise.all(adminList.map(async (addr) => {
@@ -216,7 +255,7 @@ router.post('/', async (req, res) => {
     return;
   } catch (err) {
     console.error('[exhibitors] register error (mongo):', err && (err.stack || err));
-    return res.status(500).json({ success: false, error: 'Server error registering exhibitor', detail: err && err.message ?  err.message : String(err) });
+    return res.status(500).json({ success: false, error: 'Server error registering exhibitor', detail: err && err.message ? err.message : String(err) });
   }
 });
 
@@ -226,7 +265,7 @@ router.post('/', async (req, res) => {
  * THIS ENDPOINT MUST ONLY SEND THE TICKET EMAIL (badge, QR, etc).
  * It delegates to utils/sendTicketEmail so template and badge are centralized.
  */
-router. post('/:id/resend-email', async (req, res) => {
+router.post('/:id/resend-email', async (req, res) => {
   try {
     const id = req.params.id;
     console.debug('[exhibitors] resend-email called for id=', id);
@@ -239,11 +278,11 @@ router. post('/:id/resend-email', async (req, res) => {
     if (!oid) return res.status(400).json({ success: false, error: 'invalid id' });
 
     const col = db.collection('exhibitors');
-    const doc = await col. findOne({ _id: oid });
+    const doc = await col.findOne({ _id: oid });
     if (!doc) return res.status(404).json({ success: false, error: 'exhibitor not found' });
 
-    const email = doc.email || (doc.data && (doc.data.email || doc. data.emailAddress)) || '';
-    if (!email || typeof email !== 'string' || ! email.includes('@')) {
+    const email = doc.email || (doc.data && (doc.data.email || doc.data.emailAddress)) || '';
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
       return res.status(400).json({ success: false, error: 'no valid email on record' });
     }
 
@@ -255,12 +294,12 @@ router. post('/:id/resend-email', async (req, res) => {
         return res.json({ success: true, mail: { ok: true, info: result.info || null } });
       } else {
         await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } });
-        return res.status(500).json({ success: false, mail: { ok: false, error: result && result.error ?  result.error : 'ticket_send_failed' } });
+        return res.status(500).json({ success: false, mail: { ok: false, error: result && result.error ? result.error : 'ticket_send_failed' } });
       }
     } catch (e) {
       console.error('[exhibitors] resend-email send error:', e && (e.stack || e));
-      try { await col.updateOne({ _id: oid }, { $set:  { ticket_email_failed: true, ticket_email_failed_at: new Date() } }); } catch {}
-      return res.status(500).json({ success: false, mail: { ok: false, error:  'Failed to send ticket email' } });
+      try { await col.updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } }); } catch { }
+      return res.status(500).json({ success: false, mail: { ok: false, error: 'Failed to send ticket email' } });
     }
   } catch (err) {
     console.error('[exhibitors] resend-email error:', err && (err.stack || err));
@@ -279,9 +318,9 @@ router.get('/', async (req, res) => {
     if (!db) return res.status(500).json({ error: 'database not available' });
     const col = db.collection('exhibitors');
     const rows = await col.find({}).sort({ created_at: -1 }).limit(2000).toArray();
-    return res.json(rows. map(r => {
+    return res.json(rows.map(r => {
       const copy = { ...r };
-      if (copy._id) { copy. id = String(copy._id); }
+      if (copy._id) { copy.id = String(copy._id); }
       return copy;
     }));
   } catch (err) {
@@ -297,10 +336,10 @@ router.get('/:id', async (req, res) => {
   try {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ error: 'database not available' });
-    const oid = toObjectId(req. params.id);
+    const oid = toObjectId(req.params.id);
     if (!oid) return res.status(400).json({ error: 'invalid id' });
     const col = db.collection('exhibitors');
-    const doc = await col. findOne({ _id: oid });
+    const doc = await col.findOne({ _id: oid });
     if (!doc) return res.status(404).json({ error: 'not found' });
     const copy = { ...doc };
     if (copy._id) { copy.id = String(copy._id); }
@@ -318,7 +357,7 @@ router.put('/:id', async (req, res) => {
   try {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
-    const oid = toObjectId(req. params.id);
+    const oid = toObjectId(req.params.id);
     if (!oid) return res.status(400).json({ success: false, error: 'invalid id' });
 
     const fields = { ...(req.body || {}) };
@@ -327,7 +366,7 @@ router.put('/:id', async (req, res) => {
 
     if (Object.keys(fields).length === 0) return res.status(400).json({ success: false, error: 'No fields to update' });
 
-    const update = { ... fields, updated_at: new Date() };
+    const update = { ...fields, updated_at: new Date() };
 
     const col = db.collection('exhibitors');
     const r = await col.updateOne({ _id: oid }, { $set: update });
@@ -355,10 +394,10 @@ router.delete('/:id', async (req, res) => {
     if (!oid) return res.status(400).json({ success: false, error: 'invalid id' });
     const col = db.collection('exhibitors');
     const r = await col.deleteOne({ _id: oid });
-    if (r.deletedCount === 0) return res.status(404).json({ success: false, error:  'Exhibitor not found' });
+    if (r.deletedCount === 0) return res.status(404).json({ success: false, error: 'Exhibitor not found' });
     return res.json({ success: true });
   } catch (err) {
-    console.error('Exhibitor delete (mongo) error:', err && (err. stack || err));
+    console.error('Exhibitor delete (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ success: false, error: 'Failed to delete exhibitor' });
   }
 });
@@ -370,12 +409,12 @@ router.delete('/:id', async (req, res) => {
  */
 router.post('/:id/approve', async (req, res) => {
   const id = req.params.id;
-  const admin = req.body && req.body.admin ?  String(req.body.admin) : 'web-admin';
+  const admin = req.body && req.body.admin ? String(req.body.admin) : 'web-admin';
   if (!id) return res.status(400).json({ success: false, error: 'Missing id' });
 
   try {
     const db = await obtainDb();
-    if (!db) return res.status(500).json({ success: false, error:  'database not available' });
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
     const col = db.collection('exhibitors');
 
     const oid = toObjectId(id);
@@ -391,7 +430,7 @@ router.post('/:id/approve', async (req, res) => {
     if (copy._id) { copy.id = String(copy._id); }
 
     // respond quickly
-    res.json({ success: true, id, updated:  copy });
+    res.json({ success: true, id, updated: copy });
 
     // Background: send approval status email (NO ticket, NO badge)
     if (copy && isEmailLike(copy.email)) {
@@ -403,14 +442,14 @@ router.post('/:id/approve', async (req, res) => {
             subject: `Your exhibitor request has been approved — RailTrans Expo`,
             text: `Hello ${name},
 
-Your exhibitor registration (ID: ${copy. id}) has been approved. Our team will contact you with next steps. 
+Your exhibitor registration (ID: ${copy.id}) has been approved. Our team will contact you with next steps. 
 
 Regards,
 RailTrans Expo Team
 support@railtransexpo.com`,
             html: `<p>Hello ${name},</p><p>Your exhibitor registration (ID:  <strong>${copy.id}</strong>) has been <strong>approved</strong>.</p>`
           };
-          await sendMail({ to, subject: mail. subject, text: mail.text, html: mail.html });
+          await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html });
         } catch (e) {
           console.error('[exhibitors] approval email error:', e && (e.stack || e));
         }
@@ -420,11 +459,11 @@ support@railtransexpo.com`,
     // notify admins (background)
     (async () => {
       try {
-        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env. ADMIN_EMAILS || '');
+        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
         const toAddrs = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
         if (!toAddrs.length) return;
-        const subject = `Exhibitor approved — ID: ${updated ?  updated._id : id}`;
-        const text = `Exhibitor approved\nID: ${updated ? updated._id : id}\nName: ${updated ? updated.name || updated.company || '' : ''}\nEmail: ${updated ? updated.email :  ''}`;
+        const subject = `Exhibitor approved — ID: ${updated ? updated._id : id}`;
+        const text = `Exhibitor approved\nID: ${updated ? updated._id : id}\nName: ${updated ? updated.name || updated.company || '' : ''}\nEmail: ${updated ? updated.email : ''}`;
         const html = `<p>Exhibitor approved</p><pre>${JSON.stringify(updated || {}, null, 2)}</pre>`;
         await Promise.all(toAddrs.map(addr => sendMail({ to: addr, subject, text, html }).catch(e => console.error('[exhibitors] admin email error:', addr, e && (e.message || e)))));
       } catch (e) {
@@ -444,7 +483,7 @@ support@railtransexpo.com`,
  */
 router.post('/:id/cancel', async (req, res) => {
   const id = req.params.id;
-  const admin = req.body && req.body. admin ? String(req.body. admin) : 'web-admin';
+  const admin = req.body && req.body.admin ? String(req.body.admin) : 'web-admin';
   if (!id) return res.status(400).json({ success: false, error: 'Missing id' });
 
   try {
@@ -471,7 +510,7 @@ router.post('/:id/cancel', async (req, res) => {
       (async () => {
         try {
           const to = copy.email;
-          const name = copy.name || copy. company || '';
+          const name = copy.name || copy.company || '';
           const mail = {
             subject: `Your exhibitor registration has been cancelled — RailTrans Expo`,
             text: `Hello ${name},
@@ -497,10 +536,10 @@ RailTrans Expo Team`,
         if (!toAddrs.length) return;
         const subject = `Exhibitor cancelled — ID: ${updated ? updated._id : id}`;
         const text = `Exhibitor cancelled\nID: ${updated ? updated._id : id}\nName: ${updated ? updated.name || updated.company || '' : ''}\nEmail: ${updated ? updated.email : ''}`;
-        const html = `<p>Exhibitor cancelled</p><pre>${JSON. stringify(updated || {}, null, 2)}</pre>`;
+        const html = `<p>Exhibitor cancelled</p><pre>${JSON.stringify(updated || {}, null, 2)}</pre>`;
         await Promise.all(toAddrs.map(addr => sendMail({ to: addr, subject, text, html }).catch(e => console.error('[exhibitors] admin cancel notify error:', addr, e && (e.message || e)))));
       } catch (e) {
-        console.error('[exhibitors] admin cancel notify error:', e && (e. stack || e));
+        console.error('[exhibitors] admin cancel notify error:', e && (e.stack || e));
       }
     })();
 
