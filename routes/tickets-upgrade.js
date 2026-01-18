@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const { ObjectId } = require("mongodb");
-const { getDb } = require("../utils/mongoClient"); // should export async getDb()
-const { sendMail } = require("../utils/mailer");
-const { ensureTicketCodeUniqueIndex } = require("../utils/mongoSchemaSync"); // optional helper if available
+const mongo = require("../utils/mongoClient");
+const sendTicketEmail = require("../utils/sendTicketEmail");
+
+console.log("🔥 tickets-upgrade.js LOADING.. .");
 
 /**
- * Allowed entity collections that can be upgraded.
- * Restrict to known collections to avoid arbitrary collection access.
+ * Allowed entity collections
  */
 const ALLOWED_ENTITIES = new Set([
   "speakers",
@@ -17,12 +17,14 @@ const ALLOWED_ENTITIES = new Set([
   "visitors",
 ]);
 
-const API_BASE = (process.env.API_BASE || process.env.BACKEND_URL || "/api").replace(/\/$/, "");
+const API_BASE = (process.env.API_BASE || process.env. BACKEND_URL || "").replace(/\/$/, "");
 const FRONTEND_BASE = (process.env.FRONTEND_BASE || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
 
-function makeApiUrl(path) {
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${API_BASE}${p}`;
+async function obtainDb() {
+  if (!mongo) return null;
+  if (typeof mongo. getDb === "function") return await mongo.getDb();
+  if (mongo.db) return mongo.db;
+  return null;
 }
 
 function generateTicketCode(length = 6, prefix = "TICK-") {
@@ -43,228 +45,352 @@ function normalizeEmail(e) {
 /**
  * POST /api/tickets/upgrade
  *
- * Body:
- *  - entity_type: string (collection name, plural)
- *  - entity_id: string (Mongo _id or string id)
+ * Body:  
+ *  - entity_type: string (collection name)
+ *  - entity_id: string (Mongo _id)
  *  - new_category: string
- *  - amount: number (optional)
- *  - email: string (the email to verify ownership; server will validate against stored email)
- *
- * Behavior:
- *  - Validate inputs and entity_type whitelist
- *  - Fetch the entity row (deterministic)
- *  - Verify stored email exists and matches provided email (server-side authority)
- *  - If amount > 0: create a payment order (after validation) and return checkoutUrl
- *  - If amount == 0: apply upgrade immediately, create/ensure ticket in "tickets" collection (upsert by entity_type+entity_id),
- *    generate unique ticket_code if needed, update entity with ticket_category/ticket_code, send confirmation email to stored email.
+ *  - amount: number
+ *  - email: string (for verification)
+ *  - txId: string (optional, if payment already completed)
+ *  - method: string (optional:  "online", "manual", "free")
  */
 router.post("/", async (req, res) => {
   try {
-    const { entity_type, entity_id, new_category, amount = 0, email } = req.body || {};
+    console.log("[tickets-upgrade] POST request:", req.body);
 
-    // Basic validation
+    const { entity_type, entity_id, new_category, amount = 0, email, txId, method = "online" } = req.body || {};
+
+    // Validation
     if (!entity_type || !entity_id || !new_category) {
-      return res.status(400).json({ success: false, error: "entity_type, entity_id and new_category are required" });
-    }
-    if (!ALLOWED_ENTITIES.has(String(entity_type).toLowerCase())) {
-      return res.status(400).json({ success: false, error: "entity_type not allowed" });
+      return res.status(400).json({ 
+        success: false, 
+        error:  "entity_type, entity_id and new_category are required" 
+      });
     }
 
-    // canonicalize
+    if (!ALLOWED_ENTITIES.has(String(entity_type).toLowerCase())) {
+      return res.status(400).json({ 
+        success: false, 
+        error:  "entity_type not allowed" 
+      });
+    }
+
     const entityType = String(entity_type).toLowerCase();
     const targetIdRaw = String(entity_id);
 
-    // Obtain DB
-    const db = await getDb();
-    if (!db) return res.status(500).json({ success: false, error: "database not available" });
+    // Get DB
+    const db = await obtainDb();
+    if (!db) {
+      return res.status(500).json({ 
+        success: false, 
+        error: "database not available" 
+      });
+    }
 
     const entityCol = db.collection(entityType);
 
-    // Fetch entity document deterministically by id
+    // Fetch entity document
     let entityRow = null;
     try {
-      const q = ObjectId.isValid(targetIdRaw) ? { _id: new ObjectId(targetIdRaw) } : { _id: targetIdRaw };
+      const q = ObjectId. isValid(targetIdRaw) 
+        ? { _id: new ObjectId(targetIdRaw) } 
+        : { _id: targetIdRaw };
       entityRow = await entityCol.findOne(q);
     } catch (e) {
-      console.warn("[tickets-upgrade] entity lookup failed:", e && e.message);
+      console.error("[tickets-upgrade] Entity lookup failed:", e);
     }
 
     if (!entityRow) {
-      return res.status(404).json({ success: false, error: "Entity not found" });
-    }
-
-    // Server-side email ownership validation (non-optional)
-    const storedEmail = normalizeEmail(entityRow.email || entityRow.contactEmail || entityRow.data?.email || "");
-    const providedEmail = email ? normalizeEmail(email) : "";
-
-    if (!storedEmail) {
-      // No verified email on record -> reject upgrade requests originating from public flow
-      // This prevents attackers from claiming ownership when entity has no known email.
-      return res.status(403).json({
-        success: false,
-        error: "Entity has no verified email on record. Upgrade denied. Please contact support or verify your account.",
+      return res.status(404).json({ 
+        success: false, 
+        error:  "Entity not found" 
       });
     }
 
-    // If request provided an email, it must match stored email
+    // Email validation
+    const storedEmail = normalizeEmail(
+      entityRow.email || 
+      entityRow.contactEmail || 
+      entityRow. data?.email || 
+      ""
+    );
+
+    const providedEmail = email ?  normalizeEmail(email) : "";
+
+    if (! storedEmail) {
+      return res.status(403).json({
+        success: false,
+        error: "Entity has no verified email on record.  Upgrade denied.",
+      });
+    }
+
     if (providedEmail && providedEmail !== storedEmail) {
       return res.status(403).json({
         success: false,
-        error: "Provided email does not match entity record. Upgrade denied.",
+        error: "Provided email does not match entity record.",
       });
     }
 
-    // At this point we trust the actor is verified (frontend OTP should have verified email).
-    // Use storedEmail for all downstream communication.
     const emailToUse = storedEmail;
+    const amountNum = Number(amount || 0);
 
-    // PAYMENT PATH: now that we have a validated entity and verified email, create payment order if needed
-    if (Number(amount) > 0) {
-      // Build payment order payload (include entity info and customer email)
+    console.log("[tickets-upgrade] Validated:", { 
+      entityType, 
+      targetIdRaw, 
+      new_category, 
+      amountNum, 
+      method,
+      txId 
+    });
+
+    // PAYMENT PATH:  amount > 0 and no txId yet
+    if (amountNum > 0 && !txId) {
+      console.log("[tickets-upgrade] Creating payment order...");
+
       const payload = {
-        amount: Number(amount),
+        amount: amountNum,
         currency: "INR",
         description: `Ticket Upgrade - ${new_category}`,
         reference_id: String(entity_id),
-        metadata: { entity_type: entityType, new_category },
+        metadata: { 
+          entity_type: entityType, 
+          entity_id:  targetIdRaw,
+          new_category 
+        },
         customer: { email: emailToUse },
       };
+
       try {
-        const r = await fetch(makeApiUrl("/payment/create-order"), {
+        const apiUrl = API_BASE 
+          ? `${API_BASE}/api/payment/create-order`
+          : "/api/payment/create-order";
+
+        console.log("[tickets-upgrade] Calling payment API:", apiUrl);
+
+        const r = await fetch(apiUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "69420" },
-          body: JSON.stringify(payload),
+          headers: { 
+            "Content-Type": "application/json", 
+            "ngrok-skip-browser-warning": "69420" 
+          },
+          body:  JSON.stringify(payload),
         });
+
         const js = await r.json().catch(() => ({}));
-        if (!r.ok || !js.success) {
-          return res.status(502).json({ success: false, error: js.error || "Failed to create payment order", raw: js });
+
+        console.log("[tickets-upgrade] Payment response:", js);
+
+        if (!r.ok || !js. success) {
+          return res.status(502).json({ 
+            success: false, 
+            error: js.error || "Failed to create payment order", 
+            raw:  js 
+          });
         }
-        // Return order info to client; client completes checkout and calls confirm webhook or ticket finalize.
-        return res.json({ success: true, checkoutUrl: js.checkoutUrl || js.checkout_url || js.raw?.checkout_url, order: js });
+
+        return res.json({ 
+          success: true, 
+          payment_required: true,
+          checkoutUrl: js. checkoutUrl || js.checkout_url || js.raw?. checkout_url,
+          order:  js 
+        });
       } catch (e) {
-        console.error("[tickets-upgrade] Payment create order failed", e);
-        return res.status(502).json({ success: false, error: "Failed to create payment order" });
+        console.error("[tickets-upgrade] Payment creation failed:", e);
+        return res.status(502).json({ 
+          success: false, 
+          error: "Failed to create payment order:  " + e.message 
+        });
       }
     }
 
-    // ZERO-AMOUNT PATH: apply upgrade immediately in Mongo
-
-    // Ensure ticket_code unique index exists (best-effort)
-    try { if (typeof ensureTicketCodeUniqueIndex === "function") await ensureTicketCodeUniqueIndex(db, "tickets"); } catch (e) { /* ignore */ }
+    // ZERO-AMOUNT OR PAYMENT COMPLETED PATH:  apply upgrade
+    console.log("[tickets-upgrade] Applying upgrade immediately...");
 
     const ticketsCol = db.collection("tickets");
 
-    // Prefer upserting ticket by (entity_type, entity_id) to avoid trusting any ticket_code supplied by client
+    // Upsert ticket
     let ticketDoc = null;
     try {
-      const filter = { entity_type: entityType, entity_id: targetIdRaw };
-      // If an existing ticket for this entity exists, preserve its ticket_code; otherwise generate
+      const filter = { entity_type:  entityType, entity_id: targetIdRaw };
       const existingTicket = await ticketsCol.findOne(filter);
-      let ticket_code = existingTicket && existingTicket.ticket_code ? existingTicket.ticket_code : generateTicketCode();
+      let ticket_code = existingTicket?.ticket_code || generateTicketCode();
 
-      // If ticket_code collides unexpectedly, attempt few retries to generate unique codes
       const update = {
         $set: {
-          entity_type: entityType,
+          entity_type:  entityType,
           entity_id: targetIdRaw,
           name: entityRow.name || entityRow.fullName || entityRow.company || null,
           email: emailToUse || null,
           company: entityRow.company || null,
           category: new_category,
-          meta: { upgradedFrom: "self-service", upgradedAt: new Date() },
+          txId: txId || null,
+          paymentMethod: method || "free",
+          meta: { 
+            upgradedFrom: "self-service", 
+            upgradedAt: new Date(),
+            previousCategory: entityRow.ticket_category || entityRow.category || null
+          },
           updatedAt: new Date(),
         },
-        $setOnInsert: { createdAt: new Date(), ticket_code },
+        $setOnInsert: { 
+          createdAt: new Date(), 
+          ticket_code 
+        },
       };
 
-      // Try initial upsert (by entity). This avoids overwriting someone else's ticket_code.
-      const opts = { upsert: true, returnDocument: "after" };
-      const result = await ticketsCol.findOneAndUpdate(filter, update, opts);
-      ticketDoc = result && result.value ? result.value : null;
+      const result = await ticketsCol. findOneAndUpdate(
+        filter, 
+        update, 
+        { upsert: true, returnDocument: "after" }
+      );
 
-      // Defensive: if upsert didn't yield a doc (very unlikely), attempt retries generating new ticket_code and upserting by entity again
-      if (!ticketDoc) {
-        for (let i = 0; i < 5 && !ticketDoc; i++) {
-          const candidate = generateTicketCode();
-          update.$setOnInsert = { createdAt: new Date(), ticket_code: candidate };
-          const r2 = await ticketsCol.findOneAndUpdate(filter, update, opts);
-          ticketDoc = r2 && r2.value ? r2.value : null;
-        }
-      }
+      ticketDoc = result.value;
 
-      // As a final fallback, if still no ticketDoc (extremely unlikely), attempt an insert with a unique ticket_code
       if (!ticketDoc) {
+        // Fallback: insert new
         const finalCode = generateTicketCode();
         const insertRes = await ticketsCol.insertOne({
           ticket_code: finalCode,
-          entity_type: entityType,
+          entity_type:  entityType,
           entity_id: targetIdRaw,
-          name: entityRow.name || entityRow.fullName || entityRow.company || null,
-          email: emailToUse || null,
+          name: entityRow.name || entityRow.fullName || entityRow. company || null,
+          email:  emailToUse || null,
           company: entityRow.company || null,
           category: new_category,
-          meta: { upgradedFrom: "self-service", upgradedAt: new Date() },
+          txId: txId || null,
+          paymentMethod: method || "free",
+          meta: { 
+            upgradedFrom: "self-service", 
+            upgradedAt: new Date(),
+            previousCategory: entityRow.ticket_category || entityRow.category || null
+          },
           createdAt: new Date(),
           updatedAt: new Date(),
         });
         ticketDoc = await ticketsCol.findOne({ _id: insertRes.insertedId });
       }
     } catch (e) {
-      console.warn("[tickets-upgrade] Ticket upsert failed:", e && e.message);
-      // continue, we will attempt to update entity and return best-effort response
+      console.error("[tickets-upgrade] Ticket upsert failed:", e);
     }
 
-    const finalTicketCode = ticketDoc && ticketDoc.ticket_code ? ticketDoc.ticket_code : (entityRow && (entityRow.ticket_code || entityRow.code) ? String(entityRow.ticket_code || entityRow.code) : null);
+    const finalTicketCode = ticketDoc?. ticket_code || 
+      entityRow?. ticket_code || 
+      entityRow?.code || 
+      null;
 
-    // Update entity's ticket_category and ticket_code (best-effort)
+    // Update entity with new category and ticket code
     try {
-      const q = ObjectId.isValid(targetIdRaw) ? { _id: new ObjectId(targetIdRaw) } : { _id: targetIdRaw };
-      await entityCol.updateOne(q, { $set: { ticket_category: new_category, upgradedAt: new Date(), ticket_code: finalTicketCode } });
+      const q = ObjectId.isValid(targetIdRaw) 
+        ? { _id: new ObjectId(targetIdRaw) } 
+        : { _id: targetIdRaw };
+
+      await entityCol.updateOne(q, { 
+        $set: { 
+          ticket_category: new_category, 
+          ticket_code: finalTicketCode,
+          upgradedAt: new Date(),
+          txId: txId || null,
+          paymentMethod: method || null
+        } 
+      });
+
+      console.log("[tickets-upgrade] Entity updated with new category and ticket code");
     } catch (e) {
-      console.warn("[tickets-upgrade] Entity confirm update failed:", e && e.message);
+      console.error("[tickets-upgrade] Entity update failed:", e);
     }
 
-    // Send confirmation email to stored email (best-effort)
-    if (emailToUse) {
+    // ✅ Fetch updated entity to send complete ticket email
+    let updatedEntity = null;
+    try {
+      const q = ObjectId.isValid(targetIdRaw) 
+        ? { _id: new ObjectId(targetIdRaw) } 
+        : { _id: targetIdRaw };
+      updatedEntity = await entityCol.findOne(q);
+    } catch (e) {
+      console.error("[tickets-upgrade] Failed to fetch updated entity:", e);
+      updatedEntity = {
+        ... entityRow,
+        ticket_category: new_category,
+        ticket_code: finalTicketCode,
+        upgradedAt: new Date()
+      };
+    }
+
+    // ✅ Send complete ticket email with badge download
+    if (emailToUse && updatedEntity) {
       try {
-        const params = new URLSearchParams({ entity: entityType, id: String(targetIdRaw) });
-        if (finalTicketCode) params.append("ticket", finalTicketCode);
-        const upgradeManageUrl = `${FRONTEND_BASE}/ticket?${params.toString()}`;
+        console.log("[tickets-upgrade] Sending complete ticket email via sendTicketEmail...");
 
-        const subj = `Your ticket has been upgraded to ${new_category}`;
-        const bodyText = `Hello ${entityRow && (entityRow.name || entityRow.fullName || entityRow.company) || ""},
+        const emailResult = await sendTicketEmail({
+          entity: entityType,
+          record: updatedEntity,
+          frontendBase: FRONTEND_BASE,
+          options: {
+            forceSend: true,
+            includeBadge: true,
+            isUpgrade: true,
+            previousCategory: entityRow.ticket_category || entityRow.category || null
+          }
+        });
 
-Your ticket has been upgraded to ${new_category}.
-
-Ticket: ${finalTicketCode || "N/A"}
-You can view/manage your ticket here: ${upgradeManageUrl}
-
-Regards,
-Team`;
-        const bodyHtml = `<p>Hello ${entityRow && (entityRow.name || entityRow.fullName || entityRow.company) || ""},</p>
-<p>Your ticket has been upgraded to <strong>${new_category}</strong>.</p>
-<p>Ticket: <strong>${finalTicketCode || "N/A"}</strong></p>
-<p>You can view/manage your ticket <a href="${upgradeManageUrl}">here</a>.</p>`;
-
-        await sendMail({ to: emailToUse, subject: subj, text: bodyText, html: bodyHtml });
+        if (emailResult && emailResult.success) {
+          console.log("[tickets-upgrade] ✅ Ticket email sent successfully");
+          
+          // Mark email as sent in entity
+          try {
+            const q = ObjectId.isValid(targetIdRaw) 
+              ? { _id: new ObjectId(targetIdRaw) } 
+              : { _id: targetIdRaw };
+            await entityCol.updateOne(q, { 
+              $set: { 
+                ticket_email_sent_at: new Date(),
+                last_email_type: 'upgrade_confirmation'
+              },
+              $unset: { ticket_email_failed:  "" }
+            });
+          } catch {}
+        } else {
+          console.error("[tickets-upgrade] ❌ Ticket email failed:", emailResult?. error);
+          
+          // Mark email as failed
+          try {
+            const q = ObjectId.isValid(targetIdRaw) 
+              ? { _id: new ObjectId(targetIdRaw) } 
+              : { _id: targetIdRaw };
+            await entityCol. updateOne(q, { 
+              $set: { 
+                ticket_email_failed: true,
+                ticket_email_failed_at: new Date()
+              }
+            });
+          } catch {}
+        }
       } catch (e) {
-        console.warn("[tickets-upgrade] Upgrade confirmation email failed:", e && e.message);
+        console.error("[tickets-upgrade] Ticket email error:", e);
       }
     }
 
+    console.log("[tickets-upgrade] ✅ Upgrade complete");
+
     return res.json({
       success: true,
-      upgraded: true,
-      entity_type: entityType,
+      upgraded:  true,
+      entity_type:  entityType,
       entity_id: targetIdRaw,
       new_category,
-      ticket_code: finalTicketCode || null,
-      ticket: ticketDoc || undefined,
+      ticket_code: finalTicketCode,
+      ticket:  ticketDoc || undefined,
+      message: "Upgrade successful!  Check your email for your updated ticket with badge download link."
     });
   } catch (err) {
-    console.error("[tickets-upgrade] error:", err && (err.stack || err));
-    return res.status(500).json({ success: false, error: String(err && err.message ? err.message : err) });
+    console.error("[tickets-upgrade] Error:", err. stack || err);
+    return res.status(500).json({ 
+      success: false, 
+      error: String(err. message || err) 
+    });
   }
 });
+
+console.log("✅ tickets-upgrade.js LOADED");
 
 module.exports = router;
