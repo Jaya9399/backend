@@ -9,6 +9,27 @@ const mailer = require('../utils/mailer');
 const sendTicketEmail = require('../utils/sendTicketEmail');
 
 // Try to reuse safeFieldName if available, otherwise provide local fallback
+
+// OTP verification helper (shared global store from otp.js)
+function checkOtpToken(role, email, token) {
+  if (!role || !email || !token) return false;
+
+  const store = global._otpVerifiedStore;
+  if (!store) return false;
+
+  const key = `verified::${role}::${email.toLowerCase()}`;
+  const info = store.get(key);
+
+  if (!info || info.token !== token) return false;
+  if (info.expires < Date.now()) {
+    store.delete(key);
+    return false;
+  }
+
+  store.delete(key); // single-use
+  return true;
+}
+
 let safeFieldName;
 try {
   safeFieldName = require('../utils/mongoSchemaSync').safeFieldName;
@@ -32,7 +53,7 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
-    const ext = path.extname(file. originalname || '') || '';
+    const ext = path.extname(file.originalname || '') || '';
     cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
   }
 });
@@ -49,13 +70,13 @@ function docToOutput(doc) {
   if (!doc) return null;
   const out = { ...(doc || {}) };
   if (out._id) {
-    out. id = String(out._id);
+    out.id = String(out._id);
   }
   return out;
 }
 
 function convertBigIntForJson(value) {
-  if (typeof value === 'bigint') return value. toString();
+  if (typeof value === 'bigint') return value.toString();
   if (Array.isArray(value)) return value.map(convertBigIntForJson);
   if (value && typeof value === 'object') {
     const out = {};
@@ -71,15 +92,15 @@ function generateTicketCode() {
 
 async function loadAdminFields(db, pageName = 'awardee') {
   try {
-    const col = db. collection('registration_configs');
+    const col = db.collection('registration_configs');
     const doc = await col.findOne({ page: pageName });
-    const fields = (doc && doc.config && Array.isArray(doc.config. fields)) ? doc.config.fields : [];
+    const fields = (doc && doc.config && Array.isArray(doc.config.fields)) ? doc.config.fields : [];
     const originalNames = new Set();
     const safeNames = new Set();
     for (const f of fields) {
-      if (! f || !f.name) continue;
+      if (!f || !f.name) continue;
       const name = String(f.name).trim();
-      if (! name) continue;
+      if (!name) continue;
       originalNames.add(name);
       const sn = safeFieldName(name);
       if (sn) safeNames.add(sn);
@@ -119,7 +140,7 @@ support@railtransexpo.com
     subject,
     text,
     html,
-    from:  process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
+    from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
   };
 }
 
@@ -132,13 +153,32 @@ support@railtransexpo.com
 router.post('/', express.json(), async (req, res) => {
   try {
     const db = await obtainDb();
-    if (!db) return res.status(500).json({ success: false, error:  'database not available' });
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
     const body = req.body || {};
     const form = body.form || body || {};
 
     // Track if created by admin
     const addedByAdmin = !!body.added_by_admin;
+    // 🔐 OTP verification (skip if admin-created)
+    if (!addedByAdmin) {
+      const email = (form.email || '').toString().trim();
+
+      if (!isEmailLike(email)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid email required for OTP verification',
+        });
+      }
+
+      const verificationToken = body.verificationToken;
+      if (!checkOtpToken('awardee', email, verificationToken)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Email not verified via OTP',
+        });
+      }
+    }
 
     // Build document
     const doc = {
@@ -160,12 +200,12 @@ router.post('/', express.json(), async (req, res) => {
     };
 
     if (addedByAdmin) {
-      doc.admin_created_at = body.admin_created_at ?  new Date(body.admin_created_at) : new Date();
+      doc.admin_created_at = body.admin_created_at ? new Date(body.admin_created_at) : new Date();
     }
 
     const col = db.collection('awardees');
     const r = await col.insertOne(doc);
-    const insertedId = r. insertedId ? String(r. insertedId) : null;
+    const insertedId = r.insertedId ? String(r.insertedId) : null;
 
     const saved = await col.findOne({ _id: r.insertedId });
 
@@ -174,14 +214,14 @@ router.post('/', express.json(), async (req, res) => {
       success: true,
       insertedId,
       ticket_code: doc.ticket_code,
-      saved:  docToOutput(saved),
+      saved: docToOutput(saved),
       mail: { queued: true } // ✅ Email queued regardless of added_by_admin
     }));
 
     // Background ACK email (fire-and-forget)
     (async () => {
       try {
-        if (! doc.email) return;
+        if (!doc.email) return;
         const mail = buildAwardeeAckEmail({
           name: doc.name || doc.organization,
         });
@@ -219,7 +259,7 @@ router.post('/', express.json(), async (req, res) => {
       try {
         const adminEnv = (process.env.AWARDEE_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
         const admins = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-        if (admins. length) {
+        if (admins.length) {
           const adminSubject = `New awardee registration — ID: ${insertedId || ''}${addedByAdmin ? ' (Admin Created)' : ''}`;
           const adminText = `New awardee:\n${JSON.stringify(doc, null, 2)}`;
           const adminHtml = `<pre>${JSON.stringify(doc, null, 2)}</pre>`;
@@ -261,8 +301,8 @@ router.post('/:id/resend-email', async (req, res) => {
     }
 
     const doc = await db.collection('awardees').findOne({ _id: oid });
-    if (!doc) return res.status(404).json({ success: false, error:  'Awardee not found' });
-    if (! doc.email) return res.status(400).json({ success: false, error: 'No email found for awardee' });
+    if (!doc) return res.status(404).json({ success: false, error: 'Awardee not found' });
+    if (!doc.email) return res.status(400).json({ success: false, error: 'No email found for awardee' });
 
     const mail = buildAwardeeAckEmail({
       name: doc.name || doc.organization,
@@ -302,9 +342,9 @@ router.post('/:id/send-ticket', async (req, res) => {
 
     let oid;
     try {
-      oid = new ObjectId(req.params. id);
+      oid = new ObjectId(req.params.id);
     } catch {
-      return res.status(400).json({ success: false, error:  'invalid id' });
+      return res.status(400).json({ success: false, error: 'invalid id' });
     }
 
     const doc = await db.collection('awardees').findOne({ _id: oid });
@@ -319,12 +359,12 @@ router.post('/:id/send-ticket', async (req, res) => {
         return res.json({ success: true, mail: { ok: true, info: result.info || null } });
       } else {
         await db.collection('awardees').updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } });
-        return res. status(500).json({ success: false, mail: { ok: false, error:  result && result.error ?  result.error : 'ticket_send_failed' } });
+        return res.status(500).json({ success: false, mail: { ok: false, error: result && result.error ? result.error : 'ticket_send_failed' } });
       }
     } catch (e) {
       console.error('[awardees] send-ticket failed:', e && (e.stack || e));
       try {
-        await db.collection('awardees').updateOne({ _id: oid }, { $set: { ticket_email_failed:  true, ticket_email_failed_at: new Date() } });
+        await db.collection('awardees').updateOne({ _id: oid }, { $set: { ticket_email_failed: true, ticket_email_failed_at: new Date() } });
       } catch { }
       return res.status(500).json({ success: false, error: 'Failed to send ticket email' });
     }
@@ -343,7 +383,7 @@ router.get('/', async (req, res) => {
     const db = await obtainDb();
     if (!db) return res.status(500).json({ error: 'database not available' });
     const rows = await db.collection('awardees').find({}).sort({ created_at: -1 }).limit(limit).toArray();
-    return res.json(convertBigIntForJson(rows. map(docToOutput)));
+    return res.json(convertBigIntForJson(rows.map(docToOutput)));
   } catch (err) {
     console.error('[awardees] GET (mongo) error:', err && (err.stack || err));
     return res.status(500).json({ error: 'Failed to fetch awardees' });
@@ -359,7 +399,7 @@ router.post('/send-reminders', async (req, res) => {
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
 
     const cursor = db.collection('awardees').find({
-      email:  { $exists: true, $ne: "" }
+      email: { $exists: true, $ne: "" }
     });
 
     let sent = 0;
@@ -387,7 +427,7 @@ RailTrans Expo Team`;
           subject,
           text,
           html,
-          from: process.env. MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
+          from: process.env.MAIL_FROM || 'RailTrans Expo <support@railtransexpo.com>',
         });
 
         sent++;
@@ -432,7 +472,7 @@ router.get('/:id', async (req, res) => {
     try {
       oid = new ObjectId(req.params.id);
     } catch {
-      return res. status(400).json({ error: 'invalid id' });
+      return res.status(400).json({ error: 'invalid id' });
     }
     const db = await obtainDb();
     if (!db) return res.status(500).json({ error: 'database not available' });
@@ -457,7 +497,7 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
     try {
       oid = new ObjectId(id);
     } catch {
-      return res.status(400).json({ success: false, error:  'invalid id' });
+      return res.status(400).json({ success: false, error: 'invalid id' });
     }
 
     const payload = { ...(req.body || {}) };
@@ -465,7 +505,7 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
     delete payload.force;
 
     const existing = await db.collection('awardees').findOne({ _id: oid });
-    if (!existing) return res.status(404).json({ success: false, error:  'Awardee not found' });
+    if (!existing) return res.status(404).json({ success: false, error: 'Awardee not found' });
 
     const baseWhitelist = new Set(['ticket_code', 'ticket_category', 'txId', 'email', 'name', 'organization', 'mobile', 'designation', 'awardType', 'awardOther', 'bio']);
     const { originalNames, safeNames } = await loadAdminFields(db, 'awardee');
@@ -489,10 +529,10 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
     }
 
     if ('ticket_code' in updateData) {
-      const incoming = updateData.ticket_code ?  String(updateData.ticket_code).trim() : "";
+      const incoming = updateData.ticket_code ? String(updateData.ticket_code).trim() : "";
       const existingCode = existing.ticket_code ? String(existing.ticket_code).trim() : "";
-      if (! incoming) delete updateData.ticket_code;
-      else if (existingCode && ! force && incoming !== existingCode) delete updateData.ticket_code;
+      if (!incoming) delete updateData.ticket_code;
+      else if (existingCode && !force && incoming !== existingCode) delete updateData.ticket_code;
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -518,7 +558,7 @@ router.put('/:id', express.json(), async (req, res) => {
     try {
       oid = new ObjectId(req.params.id);
     } catch {
-      return res. status(400).json({ success: false, error: 'invalid id' });
+      return res.status(400).json({ success: false, error: 'invalid id' });
     }
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
@@ -537,10 +577,10 @@ router.put('/:id', express.json(), async (req, res) => {
     for (const [k, v] of Object.entries(data)) {
       if (!allowedBase.has(k)) {
         const sk = safeFieldName(k);
-        if (!sk || !allowedBase. has(sk)) continue;
+        if (!sk || !allowedBase.has(sk)) continue;
         if ((sk === 'registered_at' || sk === 'created_at') && v) {
           const d = new Date(v);
-          if (! isNaN(d.getTime())) updateData[sk] = d;
+          if (!isNaN(d.getTime())) updateData[sk] = d;
           continue;
         }
         updateData[sk] = v;
@@ -580,19 +620,19 @@ router.put('/:id', express.json(), async (req, res) => {
 /**
  * POST /api/awardees/: id/upload-proof
  */
-router. post('/:id/upload-proof', upload.single('proof'), async (req, res) => {
+router.post('/:id/upload-proof', upload.single('proof'), async (req, res) => {
   try {
     const db = await obtainDb();
-    if (!db) return res.status(500).json({ success: false, error:  'database not available' });
+    if (!db) return res.status(500).json({ success: false, error: 'database not available' });
     const id = req.params.id;
     let oid;
     try {
       oid = new ObjectId(id);
     } catch {
-      return res.status(400).json({ success: false, error:  'invalid id' });
+      return res.status(400).json({ success: false, error: 'invalid id' });
     }
 
-    if (! req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
 
     const proofPath = path.relative(process.cwd(), req.file.path);
     await db.collection('awardees').updateOne({ _id: oid }, { $set: { proof_path: proofPath, updated_at: new Date() } });
@@ -613,12 +653,12 @@ router.delete('/:id', async (req, res) => {
     try {
       oid = new ObjectId(req.params.id);
     } catch {
-      return res. status(400).json({ success: false, error: 'invalid id' });
+      return res.status(400).json({ success: false, error: 'invalid id' });
     }
     const db = await obtainDb();
     if (!db) return res.status(500).json({ success: false, error: 'database not available' });
     const r = await db.collection('awardees').deleteOne({ _id: oid });
-    if (! r.deletedCount) return res.status(404).json({ success: false, error: 'Awardee not found' });
+    if (!r.deletedCount) return res.status(404).json({ success: false, error: 'Awardee not found' });
     return res.json({ success: true });
   } catch (err) {
     console.error('[awardees] DELETE (mongo) error:', err && (err.stack || err));

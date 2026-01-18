@@ -11,6 +11,26 @@ router.use(express.json({ limit: '5mb' }));
 /**
  * Helpers / Templates
  */
+// OTP verification helper (shared global store from otp.js)
+function checkOtpToken(role, email, token) {
+  if (!role || !email || !token) return false;
+
+  const store = global._otpVerifiedStore;
+  if (!store) return false;
+
+  const key = `verified::${role}::${email.toLowerCase()}`;
+  const info = store.get(key);
+
+  if (!info || info.token !== token) return false;
+  if (info.expires < Date.now()) {
+    store.delete(key);
+    return false;
+  }
+
+  store.delete(key); // single-use
+  return true;
+}
+
 
 function buildPartnerAckEmail({ name = '', company = '' } = {}) {
   const subject = 'RailTrans Expo — Partner Request Received';
@@ -121,6 +141,25 @@ router.post('/', async (req, res) => {
     const name = String(pick(['name', 'fullName', 'full_name', 'firstName', 'first_name']) || '').trim();
     const mobile = String(pick(['mobile', 'phone', 'contact', 'whatsapp']) || '').trim();
     const email = String(pick(['email', 'mail', 'emailId', 'email_id', 'contactEmail']) || '').trim();
+    // 🔐 OTP verification (skip for admin-created partners)
+    if (!body.added_by_admin) {
+      if (!isEmailLike(email)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid email required',
+        });
+      }
+
+      const verificationToken = body.verificationToken;
+
+      if (!checkOtpToken('partner', email, verificationToken)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Email not verified via OTP',
+        });
+      }
+    }
+
     const designation = String(pick(['designation', 'role', 'title']) || '').trim();
     const company = String(pick(['companyName', 'company', 'organization', 'org']) || '').trim();
     const businessType = String(pick(['businessType', 'business_type', 'companyType']) || '').trim();
