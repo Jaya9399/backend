@@ -7,6 +7,9 @@ const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized tick
 
 // parse JSON bodies for this router
 router.use(express.json({ limit: '5mb' }));
+function generateTicketCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
 
 /**
  * Helpers / Templates
@@ -193,6 +196,16 @@ router.post('/', async (req, res) => {
     }
 
     const col = db.collection('partners');
+
+    // 🔥 ENFORCE ticket_code (MANDATORY)
+    let ticket_code = body.ticket_code;
+    if (!ticket_code) {
+      do {
+        ticket_code = generateTicketCode();
+      } while (await col.findOne({ ticket_code }));
+    }
+    doc.ticket_code = ticket_code;
+    
     const r = await col.insertOne(doc);
     const insertedId = r && r.insertedId ? String(r.insertedId) : null;
 

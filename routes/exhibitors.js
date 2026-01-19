@@ -7,6 +7,11 @@ const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized tick
 
 // parse JSON bodies for all routes in this router
 router.use(express.json({ limit: '5mb' }));
+
+function generateTicketCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
 // OTP verification helper (shared global store from otp.js)
 function checkOtpToken(role, email, token) {
   if (!role || !email || !token) return false;
@@ -190,7 +195,13 @@ router.post('/', async (req, res) => {
     doc.status = 'pending';
     doc.created_at = new Date();
     doc.updated_at = new Date();
-
+    let ticket_code = body.ticket_code;
+    if (!ticket_code) {
+      do {
+        ticket_code = generateTicketCode();
+      } while (await col.findOne({ ticket_code }));
+    }
+    doc.ticket_code = ticket_code;
     const insertRes = await col.insertOne(doc);
     const insertedId = insertRes && insertRes.insertedId ? String(insertRes.insertedId) : null;
 

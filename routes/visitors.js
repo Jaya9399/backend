@@ -112,22 +112,27 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Valid email required" });
     }
 
-    // 🔐 OTP verification (REQUIRED)
+    // 🔐 OTP verification (SKIP for admin-created records)
+    const isAdminCreate = !!body.added_by_admin;
+
     const verificationToken =
       body.verificationToken || form.verificationToken;
 
-    if (
-      !checkOtpToken(
-        "visitor",
-        email,
-        verificationToken
-      )
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: "Email not verified via OTP",
-      });
+    if (!isAdminCreate) {
+      if (
+        !checkOtpToken(
+          "visitor",
+          email,
+          verificationToken
+        )
+      ) {
+        return res.status(403).json({
+          success: false,
+          error: "Email not verified via OTP",
+        });
+      }
     }
+
 
     // Generate unique ticket_code (collision-safe)
     const coll = db.collection("visitors");
