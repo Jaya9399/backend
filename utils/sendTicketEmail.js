@@ -56,40 +56,20 @@ async function safeFetch(url) {
  */
 async function fetchEventDetails() {
   const apiBase = process.env.BACKEND_URL || process.env.API_BASE || "";
-  
-  if (!apiBase) {
-    console.warn("[sendTicketEmail] ⚠️ BACKEND_URL not set in . env");
-    return null;
-  }
+  if (!apiBase || !/^https?:\/\//i.test(apiBase)) return null;
 
-  if (!/^https?:\/\//i.test(apiBase)) {
-    console.warn("[sendTicketEmail] ⚠️ BACKEND_URL must be absolute (http://...):", apiBase);
-    return null;
-  }
+  const url = `${apiBase.replace(/\/$/, "")}/api/configs/event-details?cb=${Date.now()}`;
+  const js = await safeFetch(url);
+  if (!js || !js.value) return null;
 
-  const paths = ["/api/configs/event-details", "/api/event-details"];
-  
-  for (const path of paths) {
-    const url = `${apiBase. replace(/\/$/, "")}${path}?cb=${Date.now()}`;
-    const js = await safeFetch(url);
-    
-    if (! js) continue;
-    
-    const val = js.value !== undefined ? js.value : js;
-    if (val && typeof val === "object" && Object.keys(val).length) {
-      console.log("[sendTicketEmail] ✅ Event details:", val. name);
-      return {
-        name: val.name || val.eventName || val.title || "",
-        dates: val.dates || val.date || val.eventDates || "",
-        time: val.time || val.startTime || val.eventTime || "",
-        venue: val.venue || val.location || val.eventVenue || "",
-        tagline: val.tagline || val.subtitle || "",
-      };
-    }
-  }
-  
-  console.warn("[sendTicketEmail] ⚠️ Could not fetch event details");
-  return null;
+  const val = js.value;
+  return {
+    name: val.name || "",
+    dates: val.dates || val.date || "",
+    time: val.time || val.startTime || "",
+    venue: val.venue || val.location || "",
+    tagline: val.tagline || "",
+  };
 }
 
 /**
