@@ -145,14 +145,14 @@ async function generateBadgePDF(entity, data, options = {}) {
         height: qrSize,
       });
 
-      /* ---------- TICKET CODE ---------- */
-      doc
-        .fillColor(DARK)
-        .fontSize(10)
-        .font("Courier-Bold")
-        .text(`Ticket:  ${ticketCode}`, 0, 395, {
-          align: "center",
-        });
+      // /* ---------- TICKET CODE ---------- */
+      // doc
+      //   .fillColor(DARK)
+      //   .fontSize(10)
+      //   .font("Courier-Bold")
+      //   .text(`Ticket:  ${ticketCode}`, 0, 395, {
+      //     align: "center",
+      //   });
 
       /* ---------- BOTTOM RIBBON ---------- */
       doc.rect(0, 460, 360, 60).fill(color);
