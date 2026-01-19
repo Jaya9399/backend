@@ -29,7 +29,20 @@ async function generateBadgePDF(entity, data, options = {}) {
     try {
       const { mode = "email", showFooter = true } = options;
 
-      if (! data || ! data.ticket_code) {
+      // 🔥 NORMALIZE ticket_code (CRITICAL)
+      const ticketCode =
+        data?.ticket_code ||
+        data?.ticketCode ||
+        data?.data?.ticket_code ||
+        data?.data?.ticketCode;
+
+      if (!ticketCode) {
+        console.error("[badgeGenerator] Missing ticket_code", {
+          entity,
+          id: data?._id,
+          keys: Object.keys(data || {}),
+          dataKeys: Object.keys(data?.data || {}),
+        });
         throw new Error("ticket_code is required for badge generation");
       }
 
@@ -51,7 +64,7 @@ async function generateBadgePDF(entity, data, options = {}) {
       });
 
       const buffers = [];
-      doc.on("data", buffers.push. bind(buffers));
+      doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
       /* ---------- CONSTANT COLORS ---------- */
@@ -79,9 +92,9 @@ async function generateBadgePDF(entity, data, options = {}) {
         .fill("white");
 
       /* ---------- NAME ---------- */
-      const name = data.name || data. full_name || "Attendee";
+      const name = data.name || data.full_name || "Attendee";
       doc
-        . fillColor(DARK)
+        .fillColor(DARK)
         .fontSize(16)
         .font("Helvetica-Bold")
         .text(name, 40, 145, {
@@ -105,12 +118,13 @@ async function generateBadgePDF(entity, data, options = {}) {
       // For scan mode:  QR contains just ticket_code (simpler, faster scan)
       // For email mode: QR contains JSON payload (more info for validation)
       const qrPayload = mode === "scan"
-        ? data.ticket_code
+        ? ticketCode
         : JSON.stringify({
-            ticket_code: data. ticket_code,
-            name: name,
-            entity,
-          });
+          ticket_code: ticketCode,
+          name,
+          entity,
+        });
+
 
       const qrSize = mode === "scan" ? 200 : 180; // Larger QR for scan mode
 
@@ -120,13 +134,13 @@ async function generateBadgePDF(entity, data, options = {}) {
         width: qrSize,
       });
 
-      const qrBase64 = qrDataUrl. split(",")[1];
+      const qrBase64 = qrDataUrl.split(",")[1];
       const qrBuffer = Buffer.from(qrBase64, "base64");
 
       const qrY = mode === "scan" ? 195 : 205;
       const qrX = (360 - qrSize) / 2;
 
-      doc. image(qrBuffer, qrX, qrY, {
+      doc.image(qrBuffer, qrX, qrY, {
         width: qrSize,
         height: qrSize,
       });
@@ -136,12 +150,12 @@ async function generateBadgePDF(entity, data, options = {}) {
         .fillColor(DARK)
         .fontSize(10)
         .font("Courier-Bold")
-        .text(`Ticket:  ${data.ticket_code}`, 0, 395, {
+        .text(`Ticket:  ${ticketCode}`, 0, 395, {
           align: "center",
         });
 
       /* ---------- BOTTOM RIBBON ---------- */
-      doc. rect(0, 460, 360, 60).fill(color);
+      doc.rect(0, 460, 360, 60).fill(color);
 
       doc
         .fillColor("white")
