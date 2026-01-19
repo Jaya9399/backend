@@ -123,6 +123,7 @@ function determineRoleLabel(visitor = {}, explicitTicketCategory = "") {
  */
 async function buildTicketEmail({
   frontendBase = "",
+  backendBase = "",  // <-- add this
   entity = "attendee",
   id = "",
   name = "",
@@ -135,8 +136,12 @@ async function buildTicketEmail({
   form = null,
   pdfBase64 = null,
 } = {}) {
+
   const effectiveFrontend = String(frontendBase || getEnvFrontendBase() || "").replace(/\/$/, "");
-  const effectiveBackend = String(getEnvApiBase() || effectiveFrontend || "").replace(/\/$/, "");
+  const effectiveBackend = String(backendBase || getEnvApiBase() || effectiveFrontend || "").replace(/\/$/, "");
+
+  // Now resolvedDownload will be correct:
+  const resolvedDownload = `${effectiveBackend}/api/tickets/download?entity=${encodeURIComponent(entity)}&id=${encodeURIComponent(id)}`;
 
   console.log("[emailTemplate] ========================================");
   console.log("[emailTemplate] Backend URL:", effectiveBackend);
@@ -156,9 +161,7 @@ async function buildTicketEmail({
   const resolvedLogo = normalizeForEmailUrl(logoUrl || "", effectiveFrontend);
   const resolvedBadgePreview = normalizeForEmailUrl(badgePreviewUrl || "", effectiveFrontend);
 
-  // ✅ FIXED: Download URL with QUERY PARAMS (not path params)
-  const resolvedDownload = `${effectiveBackend}/api/tickets/download?entity=${encodeURIComponent(entity)}&id=${encodeURIComponent(id)}`;
-
+  
   console.log("[emailTemplate] Download URL:", resolvedDownload);
 
   // ✅ Frontend upgrade URL (visitors only)
