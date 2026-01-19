@@ -10,55 +10,6 @@
  * ✅ UPGRADE SUPPORT: Shows upgrade messaging when isUpgrade=true
  */
 
-function getEnvFrontendBase() {
-  try {
-    if (typeof process !== "undefined" && process.env) {
-      const env =
-        process.env.FRONTEND_BASE ||
-        process.env.REACT_APP_FRONTEND_BASE ||
-        process.env.PUBLIC_BASE_URL ||
-        "";
-      if (env && String(env).trim()) return String(env).replace(/\/$/, "");
-    }
-  } catch (e) { }
-  return "";
-}
-
-function getEnvApiBase() {
-  try {
-    if (typeof process !== "undefined" && process.env) {
-      const env =
-        process.env.BACKEND_URL ||
-        process.env.API_BASE ||
-        process.env.REACT_APP_API_BASE ||
-        "";
-      if (env && String(env).trim()) return String(env).replace(/\/$/, "");
-    }
-  } catch (e) { }
-  return "";
-}
-
-function buildAbsolute(base, path) {
-  if (!base) return path || "";
-  const b = String(base).replace(/\/$/, "");
-  if (!path) return b;
-  if (/^https?:\/\//i.test(path)) return path;
-  if (path.startsWith("/")) return b + path;
-  return b + "/" + path.replace(/^\//, "");
-}
-
-function normalizeForEmailUrl(url, base) {
-  if (!url) return "";
-  const s = String(url).trim();
-  if (!s) return "";
-  if (s.startsWith("data:")) return s;
-  if (/^https?:\/\//i.test(s)) return s;
-  const effectiveBase = base || getEnvFrontendBase() || "";
-  if (!effectiveBase) return s;
-  if (s.startsWith("/")) return effectiveBase + s;
-  return effectiveBase + "/" + s.replace(/^\//, "");
-}
-
 function getEventFromForm(form) {
   const out = { name: "", dates: "", time: "", venue: "", tagline: "" };
   if (!form || typeof form !== "object") return out;
@@ -121,6 +72,7 @@ function determineRoleLabel(visitor = {}, explicitTicketCategory = "") {
  * ✅ FIXED: Download URL uses query params
  * ✅ UPGRADE SUPPORT: Shows upgrade banner when form.isUpgrade=true
  */
+
 async function buildTicketEmail({
   frontendBase = "",
   backendBase = "",  // <-- add this
@@ -136,12 +88,20 @@ async function buildTicketEmail({
   form = null,
   pdfBase64 = null,
 } = {}) {
-
-  const effectiveFrontend = String(frontendBase || getEnvFrontendBase() || "").replace(/\/$/, "");
-  const effectiveBackend = String(backendBase || getEnvApiBase() || effectiveFrontend || "").replace(/\/$/, "");
-
+  form = { ...(form || {}), entity };
+  if (!frontendBase || !backendBase) {
+    throw new Error(
+      "[emailTemplate] frontendBase and backendBase are REQUIRED"
+    );
+  }
+  
+  const effectiveFrontend = frontendBase.replace(/\/$/, "");
+  const effectiveBackend = backendBase.replace(/\/$/, "");
+  
   // Now resolvedDownload will be correct:
-  const resolvedDownload = `${effectiveBackend}/api/tickets/download?entity=${encodeURIComponent(entity)}&id=${encodeURIComponent(id)}`;
+  const resolvedDownload = downloadUrl
+  ? downloadUrl
+  : `${effectiveBackend}/api/tickets/download?entity=${encodeURIComponent(entity)}&id=${encodeURIComponent(id)}`;
 
   console.log("[emailTemplate] ========================================");
   console.log("[emailTemplate] Backend URL:", effectiveBackend);
@@ -158,14 +118,15 @@ async function buildTicketEmail({
   if (!ev.time) ev.time = "To Be Announced";
   if (!ev.venue) ev.venue = "To Be Announced";
 
-  const resolvedLogo = normalizeForEmailUrl(logoUrl || "", effectiveFrontend);
-  const resolvedBadgePreview = normalizeForEmailUrl(badgePreviewUrl || "", effectiveFrontend);
+  const resolvedLogo = logoUrl || "";
+  const resolvedBadgePreview = badgePreviewUrl || "";
+  let resolvedUpgrade = upgradeUrl || "";
+  
 
   
   console.log("[emailTemplate] Download URL:", resolvedDownload);
 
   // ✅ Frontend upgrade URL (visitors only)
-  let resolvedUpgrade = normalizeForEmailUrl(upgradeUrl || "", effectiveFrontend);
   if (entity === "visitors" && !resolvedUpgrade) {
     const ticketCode = form?.ticket_code || "";
     resolvedUpgrade = `${effectiveFrontend}/ticket-upgrade?entity=visitors&${id ? `id=${encodeURIComponent(String(id))}` : `ticket_code=${encodeURIComponent(ticketCode)}`
