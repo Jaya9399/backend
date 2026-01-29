@@ -48,14 +48,14 @@ function isAllowedMime(mimetype, originalname) {
   const ext = (path.extname(originalname || "") || "").toLowerCase();
 
   const allowedMimes = new Set([
-    "image/jpeg","image/jpg","image/png","image/gif","image/webp",
-    "video/mp4","video/webm","video/ogg","video/quicktime","video/x-matroska",
-    "application/pdf","text/plain","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
+    "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-matroska",
+    "application/pdf", "text/plain", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ]);
   const allowedExt = new Set([
-    ".jpg",".jpeg",".png",".gif",".webp",
-    ".mp4",".webm",".ogg",".mov",".mkv",
-    ".pdf",".txt",".doc",".docx"
+    ".jpg", ".jpeg", ".png", ".gif", ".webp",
+    ".mp4", ".webm", ".ogg", ".mov", ".mkv",
+    ".pdf", ".txt", ".doc", ".docx"
   ]);
 
   if (mime && allowedMimes.has(mime)) return true;
@@ -119,7 +119,12 @@ async function handleUpload(req, res) {
       // stream.id is an ObjectId
       const fileId = uploadStream.id && uploadStream.id.toString ? uploadStream.id.toString() : String(uploadStream.id);
       // Public URL to fetch the file via this router
-      const publicUrl = `/api/uploads/mongo/${fileId}`;
+      const base =
+        process.env.APP_URL ||
+        `${req.protocol}://${req.get("host")}`;
+
+      const publicUrl = `${base}/api/uploads/mongo/${fileId}`;
+
       return res.json({ success: true, url: publicUrl, id: fileId, filename: filename });
     });
   } catch (err) {
@@ -143,41 +148,58 @@ router.get("/uploads/mongo/:id", async (req, res) => {
   let oid;
   try {
     oid = new ObjectId(id);
-  } catch (e) {
+  } catch {
     return res.status(400).send("invalid id");
   }
 
-  try {
-    const db = await obtainDb();
-    if (!db) return res.status(500).send("database not available");
+  const db = await obtainDb();
+  if (!db) return res.status(500).send("database not available");
 
-    const filesColl = db.collection("uploads.files");
-    const fileDoc = await filesColl.findOne({ _id: oid });
-    if (!fileDoc) return res.status(404).send("file not found");
+  const filesColl = db.collection("uploads.files");
+  const fileDoc = await filesColl.findOne({ _id: oid });
+  if (!fileDoc) return res.status(404).send("file not found");
 
-    // Set headers
-    const contentType = fileDoc.contentType || (fileDoc.metadata && fileDoc.metadata.mimetype) || "application/octet-stream";
-    res.setHeader("Content-Type", contentType);
+  const fileSize = fileDoc.length;
+  const contentType =
+    fileDoc.contentType ||
+    fileDoc.metadata?.mimetype ||
+    "application/octet-stream";
 
-    // Suggest filename for downloads
-    const originalName = (fileDoc.metadata && fileDoc.metadata.originalname) || fileDoc.filename || `file-${id}`;
-    res.setHeader("Content-Disposition", `inline; filename="${String(originalName).replace(/"/g, "'")}"`);
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Accept-Ranges", "bytes");
 
-    const bucket = getBucket(db);
-    const downloadStream = bucket.openDownloadStream(oid);
+  const range = req.headers.range;
 
-    downloadStream.on("error", (err) => {
-      console.error("[upload-mongo] download error:", err && (err.stack || err));
-      if (!res.headersSent) return res.status(500).end("download error");
-      return res.end();
-    });
+  const bucket = getBucket(db);
 
-    // Pipe the GridFS stream to response
-    downloadStream.pipe(res);
-  } catch (err) {
-    console.error("[upload-mongo] GET error:", err && (err.stack || err));
-    return res.status(500).send("server error");
+  if (!range) {
+    // FULL STREAM (non-video clients)
+    res.setHeader("Content-Length", fileSize);
+    return bucket.openDownloadStream(oid).pipe(res);
   }
+
+  // RANGE REQUEST (video/audio)
+  const parts = range.replace(/bytes=/, "").split("-");
+  const start = parseInt(parts[0], 10);
+  const end = parts[1]
+    ? parseInt(parts[1], 10)
+    : fileSize - 1;
+
+  if (start >= fileSize) {
+    res.status(416).setHeader("Content-Range", `bytes */${fileSize}`);
+    return res.end();
+  }
+
+  const chunkSize = end - start + 1;
+
+  res.status(206);
+  res.setHeader("Content-Range", `bytes ${start}-${end}/${fileSize}`);
+  res.setHeader("Content-Length", chunkSize);
+
+  bucket
+    .openDownloadStream(oid, { start, end: end + 1 })
+    .pipe(res);
 });
+
 
 module.exports = router;

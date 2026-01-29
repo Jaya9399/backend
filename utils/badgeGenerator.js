@@ -1,65 +1,43 @@
-/**
- * badgeGenerator. js
- *
- * ONE badge generator for all use cases:  
- * - Email attachments (mode: "email")
- * - Scan/print at venue (mode: "scan")
- * - Admin download
- *
- * Supports two modes:
- * - email: Standard badge with JSON QR payload, normal size, includes footer text
- * - scan: Optimized for printing with larger QR, simpler payload, NO footer text (ribbon is footer)
- */
-
 const PDFDocument = require("pdfkit");
 const QRCode = require("qrcode");
 const getBadgeTheme = require("./badgeTheme");
+const CONFIG = require("./badgeConfig");
 
-/**
- * generateBadgePDF
- *
- * @param {string} entity - visitors | speakers | exhibitors | partners | awardees
- * @param {object} data - registration document from DB
- * @param {object} options - { mode: "email" | "scan", showFooter: true }
- *
- * @returns {Promise<Buffer>} PDF buffer
- */
+const ALLOWED_ENTITIES = [
+  "visitors",
+  "exhibitors",
+  "partners",
+  "speakers",
+  "awardees",
+];
+
 async function generateBadgePDF(entity, data, options = {}) {
   return new Promise(async (resolve, reject) => {
     try {
+      if (!ALLOWED_ENTITIES.includes(entity)) {
+        throw new Error(`Unsupported entity: ${entity}`);
+      }
+
       const { mode = "email", showFooter = true } = options;
 
-      // 🔥 NORMALIZE ticket_code (CRITICAL)
       const ticketCode =
         data?.ticket_code ||
         data?.ticketCode ||
-        data?.data?.ticket_code ||
-        data?.data?.ticketCode;
+        data?.data?.ticket_code;
 
       if (!ticketCode) {
-        console.error("[badgeGenerator] Missing ticket_code", {
-          entity,
-          id: data?._id,
-          keys: Object.keys(data || {}),
-          dataKeys: Object.keys(data?.data || {}),
-        });
-        throw new Error("ticket_code is required for badge generation");
+        throw new Error("ticket_code missing");
       }
 
-      /* ---------- PAID / FREE DETECTION ---------- */
       const isPaid =
         Boolean(data.txId) ||
         data.paid === true ||
-        Number(data.amount || data.total || data.price || data.ticket_price || data.ticket_total || 0) > 0;
+        Number(data.amount || 0) > 0;
 
-      /* ---------- THEME (RIBBON + COLOR) ---------- */
-      const { ribbon, color } = getBadgeTheme({
-        entity,
-        isPaid,
-      });
+      const { ribbon, color } = getBadgeTheme({ entity, isPaid });
 
       const doc = new PDFDocument({
-        size: [360, 520],
+        size: [CONFIG.PAGE.width, CONFIG.PAGE.height],
         margin: 0,
       });
 
@@ -67,66 +45,78 @@ async function generateBadgePDF(entity, data, options = {}) {
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
-      /* ---------- CONSTANT COLORS ---------- */
-      const HEADER_RED = "#C8102E";
-      const DARK = "#111827";
-      const MUTED = "#6B7280";
-      const CARD_BORDER = "#CBD5E1";
+      /* ---------- BACKGROUND IMAGE ---------- */
+      doc.save();
+      doc.opacity(CONFIG.BACKGROUND.opacity);
+      doc.image(CONFIG.BACKGROUND.path, 0, 0, {
+        width: CONFIG.PAGE.width,
+        height: CONFIG.PAGE.height,
+      });
+      doc.restore();
+
+      /* ---------- TOP COLOR STRIP ---------- */
+      doc
+        .rect(0, 0, CONFIG.PAGE.width, CONFIG.TOP_STRIP.height)
+        .fill(color);
 
       /* ---------- HEADER ---------- */
-      doc.rect(0, 0, 360, 90).fill(HEADER_RED);
+      doc
+        .rect(
+          0,
+          CONFIG.TOP_STRIP.height,
+          CONFIG.PAGE.width,
+          CONFIG.HEADER.height
+        )
+        .fill(CONFIG.HEADER.bgColor);
 
       doc
-        .fillColor("white")
-        .fontSize(18)
-        .font("Helvetica-Bold")
-        .text("RailTrans Expo 2026", 0, 32, {
-          align: "center",
+        .strokeColor(CONFIG.HEADER.borderColor)
+        .moveTo(0, CONFIG.TOP_STRIP.height + CONFIG.HEADER.height)
+        .lineTo(
+          CONFIG.PAGE.width,
+          CONFIG.TOP_STRIP.height + CONFIG.HEADER.height
+        )
+        .stroke();
+
+      /* ---------- LOGOS ---------- */
+      Object.values(CONFIG.LOGOS).forEach(logo => {
+        doc.image(logo.path, logo.x, logo.y, {
+          width: logo.width,
         });
-
-      /* ---------- CENTER CARD ---------- */
-      doc
-        .roundedRect(30, 120, 300, 280, 14)
-        .lineWidth(1)
-        .stroke(CARD_BORDER)
-        .fill("white");
+      });
 
       /* ---------- NAME ---------- */
-      const name = data.name || data.full_name || "Attendee";
+      const name = data.name || data.full_name || "UNKNOWN";
       doc
-        .fillColor(DARK)
-        .fontSize(16)
+        .fillColor("#111827")
         .font("Helvetica-Bold")
-        .text(name, 40, 145, {
-          width: 280,
-          align: "center",
-        });
+        .fontSize(CONFIG.NAME.size)
+        .text(name, 0, CONFIG.NAME.y, { align: "center" });
 
       /* ---------- COMPANY ---------- */
       if (data.company || data.organization) {
         doc
-          .fillColor(MUTED)
-          .fontSize(11)
+          .fillColor("#4B5563")
           .font("Helvetica")
-          .text(data.company || data.organization, 40, 170, {
-            width: 280,
-            align: "center",
-          });
+          .fontSize(CONFIG.COMPANY.size)
+          .text(
+            data.company || data.organization,
+            0,
+            CONFIG.COMPANY.y,
+            { align: "center" }
+          );
       }
 
-      /* ---------- QR CODE ---------- */
-      // For scan mode:  QR contains just ticket_code (simpler, faster scan)
-      // For email mode: QR contains JSON payload (more info for validation)
-      const qrPayload = mode === "scan"
-        ? ticketCode
-        : JSON.stringify({
-          ticket_code: ticketCode,
-          name,
-          entity,
-        });
+      /* ---------- QR ---------- */
+      const qrPayload =
+        mode === "scan"
+          ? ticketCode
+          : JSON.stringify({ ticket_code: ticketCode, entity });
 
-
-      const qrSize = mode === "scan" ? 200 : 180; // Larger QR for scan mode
+      const qrSize =
+        mode === "scan"
+          ? CONFIG.QR.sizeScan
+          : CONFIG.QR.sizeEmail;
 
       const qrDataUrl = await QRCode.toDataURL(qrPayload, {
         errorCorrectionLevel: "H",
@@ -134,52 +124,42 @@ async function generateBadgePDF(entity, data, options = {}) {
         width: qrSize,
       });
 
-      const qrBase64 = qrDataUrl.split(",")[1];
-      const qrBuffer = Buffer.from(qrBase64, "base64");
+      const qrBuffer = Buffer.from(
+        qrDataUrl.split(",")[1],
+        "base64"
+      );
 
-      const qrY = mode === "scan" ? 195 : 205;
-      const qrX = (360 - qrSize) / 2;
-
-      doc.image(qrBuffer, qrX, qrY, {
-        width: qrSize,
-        height: qrSize,
-      });
-
-      // /* ---------- TICKET CODE ---------- */
-      // doc
-      //   .fillColor(DARK)
-      //   .fontSize(10)
-      //   .font("Courier-Bold")
-      //   .text(`Ticket:  ${ticketCode}`, 0, 395, {
-      //     align: "center",
-      //   });
+      doc.image(
+        qrBuffer,
+        (CONFIG.PAGE.width - qrSize) / 2,
+        CONFIG.QR.y,
+        { width: qrSize }
+      );
 
       /* ---------- BOTTOM RIBBON ---------- */
-      doc.rect(0, 460, 360, 60).fill(color);
+      doc
+        .rect(0, CONFIG.RIBBON.y, CONFIG.PAGE.width, CONFIG.RIBBON.height)
+        .fill(color);
 
       doc
         .fillColor("white")
-        .fontSize(26)
         .font("Helvetica-Bold")
-        .text(ribbon, 0, 478, {
+        .fontSize(CONFIG.RIBBON.fontSize)
+        .text(ribbon, 0, CONFIG.RIBBON.y + 18, {
           align: "center",
         });
 
-      /* ---------- FOOTER TEXT ---------- */
-      // 🔥 FIX: Only show footer text in email mode (scan mode ribbon IS the footer)
+      /* ---------- FOOTER ---------- */
       if (showFooter && mode !== "scan") {
         doc
-          .fillColor(MUTED)
-          .fontSize(8)
+          .fillColor("#6B7280")
           .font("Helvetica")
+          .fontSize(CONFIG.FOOTER.size)
           .text(
             "Non-transferable • Valid only for RailTrans Expo 2026",
-            20,
-            495, // 🔥 FIX:  Moved up from 510 to avoid clipping
-            {
-              width: 320,
-              align: "center",
-            }
+            0,
+            CONFIG.FOOTER.y,
+            { align: "center" }
           );
       }
 
@@ -190,6 +170,4 @@ async function generateBadgePDF(entity, data, options = {}) {
   });
 }
 
-module.exports = {
-  generateBadgePDF,
-};
+module.exports = { generateBadgePDF };
