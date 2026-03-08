@@ -1,11 +1,12 @@
 const nodemailer = require("nodemailer");
+
 const transporter = nodemailer.createTransport({
-  host: "smtp.secureserver.net",
-  port: 587,
-  secure: false,
+  host: process.env.SMTP_HOST || "smtp.zoho.com",
+  port: Number(process.env.SMTP_PORT) || 587,
+  secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true" || Number(process.env.SMTP_PORT) === 465,
   auth: {
-    user: "support@railtransexpo.com",
-    pass: "RailTrans@2025**"
+    user: process.env.SMTP_USER || "support@railtransexpo.com",
+    pass: process.env.SMTP_PASS || "RTExpoSupport@2026**"
   },
   tls: { rejectUnauthorized: false }
 });
