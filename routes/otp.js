@@ -232,21 +232,23 @@ router.post("/send", express.json({ limit: "2mb" }), async (req, res) => {
     if (!registrationType || typeof registrationType !== "string") return res.status(400).json({ success: false, error: "registrationType required" });
 
     const emailNorm = normalizeEmail(value);
-    const regType = String(registrationType).trim();
+    const regTypeRaw = String(registrationType).trim();
+    const role = normalizeToRole(regTypeRaw);
+    if (!role) return res.status(400).json({ success: false, error: "invalid registrationType" });
 
     // check existing in registrants/per-role collections
-    const existing = await findExistingByEmailMongo(emailNorm, regType);
+    const existing = await findExistingByEmailMongo(emailNorm, role);
     if (existing) {
       return res.status(409).json({
         success: false,
         error: "Email already exists",
         existing,
-        registrationType: regType,
+        registrationType: role,
       });
     }
 
     // enforce resend cooldown
-    const key = `${regType}::${emailNorm}`;
+    const key = `${role}::${emailNorm}`;
     const now = Date.now();
     const prev = otpStore.get(key);
     if (prev && prev.cooldownUntil && prev.cooldownUntil > now) {
@@ -319,7 +321,13 @@ router.post("/send", express.json({ limit: "2mb" }), async (req, res) => {
       return res.status(500).json({ success: false, error: "Failed to send OTP" });
     }
 
-    return res.json({ success: true, email: emailNorm, registrationType: regType, otpSent: true, expiresInSec: Math.floor(OTP_TTL_MS / 1000) });
+    return res.json({
+      success: true,
+      email: emailNorm,
+      registrationType: role,
+      otpSent: true,
+      expiresInSec: Math.floor(OTP_TTL_MS / 1000),
+    });
   } catch (err) {
     console.error("[otp/send] unexpected:", err && (err.stack || err.message || err));
     return res.status(500).json({ success: false, error: "Server error" });
@@ -338,8 +346,11 @@ router.post("/verify", express.json({ limit: "2mb" }), async (req, res) => {
     }
 
     const emailKey = normalizeEmail(value);
-    const regType = String(registrationType).trim();
-    const key = `${regType}::${emailKey}`;
+    const regTypeRaw = String(registrationType).trim();
+    const role = normalizeToRole(regTypeRaw);
+    if (!role) return res.status(400).json({ success: false, error: "invalid registrationType" });
+
+    const key = `${role}::${emailKey}`;
     const rec = otpStore.get(key);
 
     if (!rec) return res.json({ success: false, error: "OTP not found or expired" });
@@ -367,26 +378,26 @@ router.post("/verify", express.json({ limit: "2mb" }), async (req, res) => {
     // ✅ generate verification token
     const verificationToken = crypto.randomUUID();
 
-    otpVerifiedStore.set(`verified::${regType}::${emailKey}`, {
+    otpVerifiedStore.set(`verified::${role}::${emailKey}`, {
       token: verificationToken,
       expires: Date.now() + OTP_TTL_MS,
     });
 
     setTimeout(() => {
-      const k = `verified::${regType}::${emailKey}`;
+      const k = `verified::${role}::${emailKey}`;
       const r = otpVerifiedStore.get(k);
       if (r && r.expires < Date.now()) otpVerifiedStore.delete(k);
     }, OTP_TTL_MS).unref();
 
     // ✅ DB lookup (INNER TRY)
     try {
-      const existing = await findExistingByEmailMongo(emailKey, regType);
+      const existing = await findExistingByEmailMongo(emailKey, role);
 
       if (existing) {
         return res.json({
           success: true,
           email: emailKey,
-          registrationType: regType,
+          registrationType: role,
           verificationToken,
           existing,
         });
@@ -395,7 +406,7 @@ router.post("/verify", express.json({ limit: "2mb" }), async (req, res) => {
       return res.json({
         success: true,
         email: emailKey,
-        registrationType: regType,
+        registrationType: role,
         verificationToken,
       });
     } catch (dbErr) {
