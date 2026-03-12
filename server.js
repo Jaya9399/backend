@@ -28,7 +28,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 const defaultOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://railtrans-expo-yld6-git-master-railtransexpos-projects.vercel.app'
+  'https://railtrans-expo-yld6-git-master-railtransexpos-projects.vercel.app',
+  'https://railtransexpo.com',
+  'https://www.railtransexpo.com'
 ];
 
 const envOrigins = (process.env.ALLOWED_ORIGINS || process.env.REACT_APP_API_BASE_URL || '')
@@ -43,6 +45,11 @@ app.use(cors({
     if (!origin) return cb(null, true);
     if (process.env.NODE_ENV !== 'production') return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
+    // Allow Vercel preview deployments (common source of "Failed to fetch" in prod)
+    try {
+      const host = new URL(origin).hostname;
+      if (host && host.toLowerCase().endsWith('.vercel.app')) return cb(null, true);
+    } catch { /* ignore */ }
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
