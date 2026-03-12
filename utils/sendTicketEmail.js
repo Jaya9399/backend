@@ -99,7 +99,7 @@ async function fetchAdminLogo() {
 /**
  * Main function:  Send ticket email with badge
  */
-module.exports = async function sendTicketEmail({ entity, record, frontendBase = ""  }) {
+module.exports = async function sendTicketEmail({ entity, record, frontendBase = "", options = {} }) {
   const doc = record;
   const config = roleConfig[entity];
 
@@ -124,6 +124,12 @@ module.exports = async function sendTicketEmail({ entity, record, frontendBase =
   const getField = (field) => doc[field] ?? doc.data?.[field];
 
   // Build email payload
+  const isUpgrade = options && typeof options === "object" ? !!options.isUpgrade : false;
+  const previousCategory =
+    options && typeof options === "object" && options.previousCategory
+      ? String(options.previousCategory)
+      : null;
+
   const emailPayload = await buildTicketEmail({
     frontendBase: frontendUrlSafe,
     backendBase: backendUrlSafe,   // ✅ ADD THIS
@@ -133,7 +139,7 @@ module.exports = async function sendTicketEmail({ entity, record, frontendBase =
     company: getField("company"),
     ticket_category: getField("ticket_category"),
     logoUrl: logoUrl || "",
-    form: { ...(doc.data ?? doc), eventDetails },
+    form: { ...(doc.data ?? doc), eventDetails, isUpgrade, previousCategory },
     pdfBase64: null,
     upgradeUrl: config.allowUpgrade ? undefined : "",
   });

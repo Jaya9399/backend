@@ -52,7 +52,7 @@ function normalizeEmail(e) {
  *  - method: string (optional:  "online", "manual", "free")
  *  - couponCode: string (optional, coupon code applied by user)
  */
-router.post("/", async (req, res) => {
+async function handleUpgrade(req, res) {
   try {
     console.log("[tickets-upgrade] POST request:", req.body);
 
@@ -403,7 +403,13 @@ router.post("/", async (req, res) => {
       error: String(err.message || err) 
     });
   }
-});
+}
+
+// ✅ Correct endpoint (frontend expects /api/tickets/upgrade)
+router.post("/upgrade", handleUpgrade);
+
+// ✅ Backward compatibility (older clients may call POST /api/tickets)
+router.post("/", handleUpgrade);
 
 console.log("✅ tickets-upgrade.js LOADED");
 

@@ -47,7 +47,13 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // Safe collection mapping
+    // Normalize entity (accept singular/plural + capitalization)
+    const entityKeyRaw = String(entity).trim().toLowerCase();
+    const entityKey = entityKeyRaw.endsWith("s")
+      ? entityKeyRaw
+      : `${entityKeyRaw}s`;
+
+    // Safe collection mapping (plural keys)
     const collectionMap = {
       visitors: "visitors",
       speakers: "speakers",
@@ -57,17 +63,17 @@ router.get("/", async (req, res) => {
     };
 
     const allowed = Object.keys(collectionMap);
-    if (!allowed.includes(entity)) {
-      console.error("[ticketDownload] Invalid entity:", entity);
+    if (!allowed.includes(entityKey)) {
+      console.error("[ticketDownload] Invalid entity:", entityKeyRaw);
       return res.status(400).json({ 
         error: "Invalid ticket type",
         allowed,
-        received: entity
+        received: entityKeyRaw
       });
     }
 
     // Validate ObjectId BEFORE using it
-    if (!ObjectId. isValid(id)) {
+    if (!ObjectId.isValid(String(id))) {
       console.error("[ticketDownload] Invalid ObjectId:", id);
       return res.status(400).json({ 
         error: "Invalid ticket ID format",
@@ -81,10 +87,10 @@ router.get("/", async (req, res) => {
       return res.status(500).json({ error: "Database not available" });
     }
 
-    const collectionName = collectionMap[entity];
-    const collection = db. collection(collectionName);
+    const collectionName = collectionMap[entityKey];
+    const collection = db.collection(collectionName);
 
-    console.log("[ticketDownload] Finding document:", { entity, id, collection:  collectionName });
+    console.log("[ticketDownload] Finding document:", { entity: entityKey, id, collection: collectionName });
 
     let doc;
     try {
@@ -103,10 +109,10 @@ router.get("/", async (req, res) => {
       });
     }
 
-    console.log("[ticketDownload] Document found:", doc. ticket_code || doc._id);
+    console.log("[ticketDownload] Document found:", doc.ticket_code || doc._id);
 
     // Check if badge generator is available
-    if (! generateBadgePDF) {
+    if (!generateBadgePDF) {
       console.error("[ticketDownload] Badge generator not available");
       return res.status(500).json({ error: "Badge generator not configured" });
     }
@@ -115,7 +121,7 @@ router.get("/", async (req, res) => {
     console.log("[ticketDownload] Generating PDF...");
     let pdfBuffer;
     try {
-      pdfBuffer = await generateBadgePDF(entity, doc);
+      pdfBuffer = await generateBadgePDF(entityKey, doc);
     } catch (pdfErr) {
       console.error("[ticketDownload] PDF generation error:", pdfErr.stack || pdfErr);
       return res.status(500).json({ 
@@ -131,7 +137,7 @@ router.get("/", async (req, res) => {
 
     console.log("[ticketDownload] ✅ PDF generated successfully, size:", pdfBuffer.length);
 
-    const filename = `RailTrans-${entity}-${doc. ticket_code || id}.pdf`;
+    const filename = `RailTrans-${entityKey}-${doc.ticket_code || id}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
