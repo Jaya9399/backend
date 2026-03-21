@@ -1,11 +1,48 @@
 const { buildTicketEmail } = require("./emailTemplate");
 const mailer = require("./mailer");
 const roleConfig = require("./emailRoleConfig");
+const mongoClient = require("./mongoClient");
 
 // Ensure no trailing slash
 function sanitizeUrl(url) {
   if (!url) return "";
   return url.replace(/\/$/, "");
+}
+
+async function obtainDb() {
+  if (!mongoClient) return null;
+  try {
+    if (typeof mongoClient.getDb === "function") return await mongoClient.getDb();
+    if (mongoClient.db) return mongoClient.db;
+  } catch (e) {
+    console.warn("[sendTicketEmail] obtainDb failed:", e && e.message);
+  }
+  return null;
+}
+
+/**
+ * Fetch event details from DB (same source as EventDetailsAdmin / configs)
+ * Returns { name, dates, time, venue, tagline } or null
+ */
+async function fetchEventDetailsFromDb() {
+  try {
+    const db = await obtainDb();
+    if (!db) return null;
+    const col = db.collection("app_configs");
+    const doc = await col.findOne({ key: "event-details" });
+    if (!doc || !doc.value || typeof doc.value !== "object") return null;
+    const val = doc.value;
+    return {
+      name: val.name || "",
+      dates: val.dates || val.date || "",
+      time: val.time || val.startTime || "",
+      venue: val.venue || val.location || "",
+      tagline: val.tagline || "",
+    };
+  } catch (e) {
+    console.warn("[sendTicketEmail] fetchEventDetailsFromDb failed:", e && e.message);
+    return null;
+  }
 }
 
 /**
@@ -49,15 +86,24 @@ async function safeFetch(url) {
 }
 
 /**
- * Fetch canonical event details from backend
+ * Fetch canonical event details (same source as EventDetailsAdmin)
+ * Tries DB first (app_configs.event-details), then HTTP /api/configs/event-details as fallback
  */
 async function fetchEventDetails() {
+  // 1. Prefer DB - same data EventDetailsAdmin saves via /api/configs/event-details
+  const fromDb = await fetchEventDetailsFromDb();
+  if (fromDb) {
+    console.log("[sendTicketEmail] Event details from DB:", fromDb.name || "(empty)");
+    return fromDb;
+  }
+
+  // 2. Fallback: HTTP if BACKEND_URL is set
   const apiBase = process.env.BACKEND_URL || process.env.API_BASE || "";
-  if (!apiBase || !/^https?:\/\//i.test(apiBase)) return null;
+  if (!apiBase || !/^https?:\/\//i.test(apiBase)) return fromDb || null;
 
   const url = `${apiBase.replace(/\/$/, "")}/api/configs/event-details?cb=${Date.now()}`;
   const js = await safeFetch(url);
-  if (!js || !js.value) return null;
+  if (!js || !js.value) return fromDb || null;
 
   const val = js.value;
   return {
