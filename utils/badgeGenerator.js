@@ -1,7 +1,19 @@
+const fs = require("fs");
 const PDFDocument = require("pdfkit");
 const QRCode = require("qrcode");
 const getBadgeTheme = require("./badgeTheme");
 const CONFIG = require("./badgeConfig");
+
+/** Embed image only if file exists (avoids ENOENT on Koyeb when assets/ not deployed). */
+function safeImage(doc, filePath, x, y, opts) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    if (filePath) {
+      console.warn("[badgeGenerator] Missing asset (skipped):", filePath);
+    }
+    return;
+  }
+  doc.image(filePath, x, y, opts);
+}
 
 const ALLOWED_ENTITIES = [
   "visitors",
@@ -46,13 +58,17 @@ async function generateBadgePDF(entity, data, options = {}) {
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
       /* ---------- BACKGROUND IMAGE ---------- */
-      doc.save();
-      doc.opacity(CONFIG.BACKGROUND.opacity);
-      doc.image(CONFIG.BACKGROUND.path, 0, 0, {
-        width: CONFIG.PAGE.width,
-        height: CONFIG.PAGE.height,
-      });
-      doc.restore();
+      if (fs.existsSync(CONFIG.BACKGROUND.path)) {
+        doc.save();
+        doc.opacity(CONFIG.BACKGROUND.opacity);
+        doc.image(CONFIG.BACKGROUND.path, 0, 0, {
+          width: CONFIG.PAGE.width,
+          height: CONFIG.PAGE.height,
+        });
+        doc.restore();
+      } else {
+        console.warn("[badgeGenerator] Background missing:", CONFIG.BACKGROUND.path);
+      }
 
       /* ---------- TOP COLOR STRIP ---------- */
       doc
@@ -80,7 +96,7 @@ async function generateBadgePDF(entity, data, options = {}) {
 
       /* ---------- LOGOS ---------- */
       Object.values(CONFIG.LOGOS).forEach(logo => {
-        doc.image(logo.path, logo.x, logo.y, {
+        safeImage(doc, logo.path, logo.x, logo.y, {
           width: logo.width,
         });
       });

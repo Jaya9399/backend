@@ -30,7 +30,10 @@ const defaultOrigins = [
   'http://127.0.0.1:3000',
   'https://railtrans-expo-yld6-git-master-railtransexpos-projects.vercel.app',
   'https://railtransexpo.com',
-  'https://www.railtransexpo.com'
+  'https://www.railtransexpo.com',
+  // IRMA India frontend (ticket upgrade, awardees, etc.)
+  'https://www.irmaindia.com',
+  'https://irmaindia.com'
 ];
 
 const envOrigins = (process.env.ALLOWED_ORIGINS || process.env.REACT_APP_API_BASE_URL || '')
@@ -53,7 +56,12 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
+  allowedHeaders: [
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'ngrok-skip-browser-warning'
+  ],
 }));
 
 // --- Simple request logger ---
