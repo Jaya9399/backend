@@ -201,8 +201,8 @@ router.post("/validate", express.json(), async (req, res) => {
     }
 
     const ticketCode = String(raw).trim();
-    if (!/^\d+$/.test(ticketCode)) {
-      return res. status(400).json({ success: false, error: "Invalid ticket_code" });
+    if (!ticketCode || ticketCode.length < 3) {
+      return res.status(400).json({ success: false, error: "Invalid ticket_code" });
     }
 
     const found = await findTicket(ticketCode);

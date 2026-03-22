@@ -43,24 +43,36 @@ const envOrigins = (process.env.ALLOWED_ORIGINS || process.env.REACT_APP_API_BAS
 
 const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
+/** Extra checks so IRMA / subdomains work even if exact origin string drifts */
+function originAllowed(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    if (host.endsWith('.vercel.app')) return true;
+    // IRMA India: apex, www, and any subdomain (admin.irmaindia.com, etc.)
+    if (host === 'irmaindia.com' || host === 'www.irmaindia.com' || host.endsWith('.irmaindia.com')) {
+      return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
     if (process.env.NODE_ENV !== 'production') return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    // Allow Vercel preview deployments (common source of "Failed to fetch" in prod)
-    try {
-      const host = new URL(origin).hostname;
-      if (host && host.toLowerCase().endsWith('.vercel.app')) return cb(null, true);
-    } catch { /* ignore */ }
+    if (originAllowed(origin)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
     'Accept',
     'Authorization',
-    'ngrok-skip-browser-warning'
+    'ngrok-skip-browser-warning',
+    'X-Requested-With'
   ],
 }));
 
