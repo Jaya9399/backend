@@ -104,7 +104,11 @@ const BG_IMAGE = {
 const QR_CARD = {
   width: 230, height: 230,
   // x, y computed dynamically: centered horizontally, positioned in upper body
-  get x() { return (400 - this.width) / 2; },
+  get x() { return (PAGE.width - this.width) / 2; },
+  get y() { 
+    const bodyY = TAGLINE_ROW.y + TAGLINE_ROW.height; // Where body starts (202)
+    return bodyY + 25; // 25px from top of body
+  },
   radius: 10,
   bgColor: "#FFFFFF",
   borderColor: "#BBBBBB",
