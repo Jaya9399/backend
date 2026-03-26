@@ -1,325 +1,238 @@
 // badgeGenerator.js — RailTrans Expo 2026
 "use strict";
 
-const fs     = require("fs");
-const path   = require("path");
-const PDF    = require("pdfkit");
+const fs = require("fs");
+const path = require("path");
+const PDF = require("pdfkit");
 const QRCode = require("qrcode");
 const getBadgeTheme = require("./badgeTheme");
-const C      = require("./badgeConfig");
+const C = require("./badgeConfig");
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helper Functions ─────────────────────────────────────────────────────────
 
-// Improved safe image loader with better path resolution
-function safeImg(doc, filePath, x, y, width) {
-  if (!filePath) {
-    console.warn("[badge] No file path provided");
-    return false;
-  }
+function safeImage(doc, filePath, x, y, width) {
+  if (!filePath) return false;
   
-  // Try multiple possible paths
   const possiblePaths = [
     filePath,
     path.join(process.cwd(), filePath),
-    path.join(__dirname, "..", filePath),
     path.join(__dirname, "..", "assets", "logos", path.basename(filePath)),
-    path.join(process.cwd(), "assets", "logos", path.basename(filePath))
+    path.join(process.cwd(), "assets", "logos", path.basename(filePath)),
+    path.join(__dirname, "..", "..", "assets", "logos", path.basename(filePath))
   ];
   
   for (const tryPath of possiblePaths) {
     if (fs.existsSync(tryPath)) {
       try {
         doc.image(tryPath, x, y, { width });
-        console.log(`[badge] ✓ Loaded: ${path.basename(tryPath)}`);
+        console.log(`✓ Loaded: ${path.basename(tryPath)}`);
         return true;
       } catch (err) {
-        console.warn(`[badge] Failed to load ${tryPath}:`, err.message);
+        // Continue trying
       }
     }
   }
   
-  console.warn(`[badge] ✗ Missing: ${path.basename(filePath)}`);
+  console.warn(`✗ Missing: ${path.basename(filePath)}`);
   return false;
 }
 
-// Rounded rectangle path — call .fill() or .stroke() after
-function rrect(doc, x, y, w, h, r) {
+function roundedRect(doc, x, y, w, h, r) {
   r = Math.min(r, w / 2, h / 2);
   doc
     .moveTo(x + r, y)
-    .lineTo(x + w - r, y).quadraticCurveTo(x + w, y, x + w, y + r)
-    .lineTo(x + w, y + h - r).quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-    .lineTo(x + r, y + h).quadraticCurveTo(x, y + h, x, y + h - r)
-    .lineTo(x, y + r).quadraticCurveTo(x, y, x + r, y)
+    .lineTo(x + w - r, y)
+    .quadraticCurveTo(x + w, y, x + w, y + r)
+    .lineTo(x + w, y + h - r)
+    .quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+    .lineTo(x + r, y + h)
+    .quadraticCurveTo(x, y + h, x, y + h - r)
+    .lineTo(x, y + r)
+    .quadraticCurveTo(x, y, x + r, y)
     .closePath();
 }
 
-// Vertical gradient: stacked thin rectangles top→bottom
-function vGradient(doc, x, y, w, h, hexTop, hexBottom) {
-  const steps = 60;
-  const p = hex => {
-    const n = parseInt(hex.replace("#", ""), 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  };
-  const [r1, g1, b1] = p(hexTop);
-  const [r2, g2, b2] = p(hexBottom);
-  const sh = h / steps;
-  for (let i = 0; i < steps; i++) {
-    const t = i / (steps - 1);
-    const hex = "#" + [
-      Math.round(r1 + (r2 - r1) * t),
-      Math.round(g1 + (g2 - g1) * t),
-      Math.round(b1 + (b2 - b1) * t),
-    ].map(v => v.toString(16).padStart(2, "0")).join("");
-    doc.rect(x, y + i * sh, w, sh + 0.5).fill(hex);
-  }
-}
+// ── Main Generator ───────────────────────────────────────────────────────────
 
-// Pill border label — "ORGANISED BY" / "IN ASSOCIATION WITH"
-function pillLabel(doc, x, y, text, fontSize, borderColor, textColor, radius) {
-  doc.save();
-  doc.font("Helvetica-Bold").fontSize(fontSize);
-  const tw = doc.widthOfString(text);
-  const pw = tw + 18;
-  const ph = fontSize + 7;
-  doc.strokeColor(borderColor).lineWidth(0.8);
-  rrect(doc, x, y, pw, ph, radius);
-  doc.stroke();
-  doc.fillColor(textColor).text(text, x + 9, y + 4, { lineBreak: false });
-  doc.restore();
-}
-
-// ── Allowed entities ──────────────────────────────────────────────────────────
-const ALLOWED = ["visitors", "exhibitors", "partners", "speakers", "awardees"];
-
-// ── Main export ───────────────────────────────────────────────────────────────
 async function generateBadgePDF(entity, data, options = {}) {
   return new Promise(async (resolve, reject) => {
     try {
-      if (!ALLOWED.includes(entity)) throw new Error(`Unsupported entity: ${entity}`);
-
-      const { mode = "email", showFooter = true } = options;
-
-      const ticketCode =
-        data?.ticket_code || data?.ticketCode || data?.data?.ticket_code;
+      const { mode = "email" } = options;
+      
+      const ticketCode = data?.ticket_code || data?.ticketCode || data?.data?.ticket_code;
       if (!ticketCode) throw new Error("ticket_code missing");
-
-      const isPaid =
-        Boolean(data.txId) || data.paid === true || Number(data.amount || 0) > 0;
-
+      
+      const isPaid = Boolean(data.txId) || data.paid === true || Number(data.amount || 0) > 0;
       const { ribbon: ribbonLabel, color: themeColor } = getBadgeTheme({ entity, isPaid });
-
-      console.log(`[badge] Generating ${ribbonLabel} badge for ${data.name || 'Unknown'}`);
-
+      
+      console.log(`Generating ${ribbonLabel} badge for ${data.name || 'Attendee'}`);
+      
       const doc = new PDF({ size: [C.PAGE.width, C.PAGE.height], margin: 0 });
       const buffers = [];
       doc.on("data", chunk => buffers.push(chunk));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
-
+      
       // ═══════════════════════════════════════════════════════════════
-      // 1. TOP COLOR STRIP (thin, same color as ribbon)
+      // 1. TOP COLOR STRIP
       // ═══════════════════════════════════════════════════════════════
-      doc.rect(0, C.TOP_STRIP.y, C.PAGE.width, C.TOP_STRIP.height)
-         .fill(themeColor);
-
+      doc.rect(0, C.TOP_STRIP.y, C.PAGE.width, C.TOP_STRIP.height).fill(themeColor);
+      
       // ═══════════════════════════════════════════════════════════════
-      // 2. CREAM HEADER
-      //    LEFT half: RailTrans logo
-      //    RIGHT half: 03|04 boxes + Bharat Mandapam + JULY 2026 + venue
+      // 2. HEADER with Logos and Date Boxes
       // ═══════════════════════════════════════════════════════════════
-      doc.rect(0, C.HEADER.y, C.PAGE.width, C.HEADER.height)
-         .fill(C.HEADER.bgColor);
-
-      // Header bottom border
-      doc.save()
-         .strokeColor(C.HEADER.borderBottomColor).lineWidth(1)
-         .moveTo(0, C.HEADER.y + C.HEADER.height)
-         .lineTo(C.PAGE.width, C.HEADER.y + C.HEADER.height)
-         .stroke().restore();
-
-      // RailTrans logo — left half
-      safeImg(doc, C.LOGO_RAILTRANS.path, C.LOGO_RAILTRANS.x, C.LOGO_RAILTRANS.y, C.LOGO_RAILTRANS.width);
-
-      // Subtle vertical divider between header halves
-      doc.save()
-         .strokeColor(C.HEADER_DIVIDER.color).lineWidth(C.HEADER_DIVIDER.lineWidth)
-         .moveTo(C.HEADER_DIVIDER.x, C.HEADER_DIVIDER.y1)
-         .lineTo(C.HEADER_DIVIDER.x, C.HEADER_DIVIDER.y2)
-         .stroke().restore();
-
-      // Date box "03"
-      const b03 = C.DATE_BOX.box03;
-      doc.rect(b03.x, b03.y, C.DATE_BOX.w, C.DATE_BOX.h).fill(C.DATE_BOX.bgColor);
-      doc.fillColor(C.DATE_BOX.textColor).font("Helvetica-Bold").fontSize(C.DATE_BOX.fontSize)
-         .text("03", b03.x, b03.y + 10, { width: C.DATE_BOX.w, align: "center" });
-
-      // Date box "04"
-      const b04 = C.DATE_BOX.box04;
-      doc.rect(b04.x, b04.y, C.DATE_BOX.w, C.DATE_BOX.h).fill(C.DATE_BOX.bgColor);
-      doc.fillColor(C.DATE_BOX.textColor).font("Helvetica-Bold").fontSize(C.DATE_BOX.fontSize)
-         .text("04", b04.x, b04.y + 10, { width: C.DATE_BOX.w, align: "center" });
-
-      // Bharat Mandapam image — right of date boxes
-      safeImg(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
-
-      // "JULY 2026"
-      doc.fillColor(C.MONTH_TEXT.color).font(C.MONTH_TEXT.font).fontSize(C.MONTH_TEXT.size)
-         .text(C.MONTH_TEXT.text, C.MONTH_TEXT.x, C.MONTH_TEXT.y,
-               { width: C.MONTH_TEXT.width, align: "left" });
-
-      // "BHARAT MANDAPAM, NEW DELHI, INDIA"
-      doc.fillColor(C.VENUE_TEXT.color).font(C.VENUE_TEXT.font).fontSize(C.VENUE_TEXT.size)
-         .text(C.VENUE_TEXT.text, C.VENUE_TEXT.x, C.VENUE_TEXT.y,
-               { width: C.VENUE_TEXT.width, align: "left" });
-
+      doc.rect(0, C.HEADER.y, C.PAGE.width, C.HEADER.height).fill(C.HEADER.bgColor);
+      
+      // RailTrans Logo
+      safeImage(doc, C.LOGO_RAILTRANS.path, C.LOGO_RAILTRANS.x, C.LOGO_RAILTRANS.y, C.LOGO_RAILTRANS.width);
+      
+      // Bharat Mandapam Logo
+      safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
+      
+      // Date Box 03
+      const db03 = C.DATE_BOX_03;
+      doc.rect(db03.x, db03.y, db03.w, db03.h).fill(db03.bgColor);
+      doc.fillColor(db03.textColor)
+         .font("Helvetica-Bold")
+         .fontSize(db03.fontSize)
+         .text(db03.text, db03.x, db03.y + 12, { width: db03.w, align: "center" });
+      
+      // Date Box 04
+      const db04 = C.DATE_BOX_04;
+      doc.rect(db04.x, db04.y, db04.w, db04.h).fill(db04.bgColor);
+      doc.fillColor(db04.textColor)
+         .font("Helvetica-Bold")
+         .fontSize(db04.fontSize)
+         .text(db04.text, db04.x, db04.y + 12, { width: db04.w, align: "center" });
+      
+      // July 2026
+      const my = C.MONTH_YEAR;
+      doc.fillColor(my.color)
+         .font(my.font)
+         .fontSize(my.fontSize)
+         .text(my.text, my.x, my.y);
+      
+      // Venue
+      const venue = C.VENUE;
+      doc.fillColor(venue.color)
+         .font(venue.font)
+         .fontSize(venue.fontSize)
+         .text(venue.text, venue.x, venue.y);
+      
       // ═══════════════════════════════════════════════════════════════
-      // 3. WHITE ROW + CENTERED RED PILL TAGLINE
+      // 3. TAGLINE PILL
       // ═══════════════════════════════════════════════════════════════
-      doc.rect(0, C.TAGLINE_ROW.y, C.PAGE.width, C.TAGLINE_ROW.height)
-         .fill(C.TAGLINE_ROW.bgColor);
-
-      doc.font(C.TAGLINE_PILL.font).fontSize(C.TAGLINE_PILL.fontSize);
-      const pillW = Math.min(
-        doc.widthOfString(C.TAGLINE_PILL.text) + C.TAGLINE_PILL.padH * 2,
-        C.PAGE.width - 24
-      );
-      const pillX = (C.PAGE.width - pillW) / 2;
-      const pillY = C.TAGLINE_PILL.y;
-      const pillH = C.TAGLINE_PILL.height;
-
-      // Fill pill background
-      doc.save();
-      rrect(doc, pillX, pillY, pillW, pillH, C.TAGLINE_PILL.radius);
-      doc.fill(C.TAGLINE_PILL.bgColor);
-      doc.restore();
-
-      // Pill text
-      doc.fillColor(C.TAGLINE_PILL.textColor).font(C.TAGLINE_PILL.font).fontSize(C.TAGLINE_PILL.fontSize)
-         .text(C.TAGLINE_PILL.text,
-               pillX + C.TAGLINE_PILL.padH,
-               pillY + C.TAGLINE_PILL.padV,
-               { width: pillW - C.TAGLINE_PILL.padH * 2, align: "center", lineBreak: false });
-
+      doc.rect(0, C.TAGLINE.y, C.PAGE.width, C.TAGLINE.height).fill(C.TAGLINE.bgColor);
+      
+      const tagline = C.TAGLINE;
+      doc.font("Helvetica-Bold").fontSize(tagline.fontSize);
+      const textWidth = doc.widthOfString(tagline.text);
+      const pillWidth = Math.min(textWidth + 30, C.PAGE.width - 40);
+      const pillX = (C.PAGE.width - pillWidth) / 2;
+      const pillY = tagline.y + (tagline.height - 22) / 2;
+      
+      roundedRect(doc, pillX, pillY, pillWidth, 22, 11);
+      doc.fill(tagline.pillColor);
+      
+      doc.fillColor(tagline.textColor)
+         .font("Helvetica-Bold")
+         .fontSize(tagline.fontSize)
+         .text(tagline.text, pillX + 15, pillY + 6, { 
+           width: pillWidth - 30, 
+           align: "center",
+           lineBreak: false 
+         });
+      
       // ═══════════════════════════════════════════════════════════════
-      // 4. BODY — light-blue gradient background
+      // 4. BODY with QR Card
       // ═══════════════════════════════════════════════════════════════
-      const bodyY = C.TAGLINE_ROW.y + C.TAGLINE_ROW.height;
-      const bodyH = C.FOOTER_ZONE.y - bodyY;
-      vGradient(doc, 0, bodyY, C.PAGE.width, bodyH, C.BODY.bgTop, C.BODY.bgBottom);
-
-      // Trains bg image — ONLY in the lower portion of body, BEHIND QR card
-      if (fs.existsSync(C.BG_IMAGE.path)) {
-        const bgY = bodyY + bodyH * 0.42;
-        const bgH = bodyH - (bgY - bodyY);
-        doc.save().opacity(C.BG_IMAGE.opacity);
-        doc.image(C.BG_IMAGE.path, 0, bgY, { width: C.PAGE.width, height: bgH });
-        doc.restore();
-      }
-
-      // White rounded QR card — drawn AFTER bg image so it covers it
+      const bodyStartY = C.BODY.startY;
+      const bodyEndY = C.FOOTER.y;
+      doc.rect(0, bodyStartY, C.PAGE.width, bodyEndY - bodyStartY).fill(C.BODY.bgColor);
+      
+      // QR Card
       const qc = C.QR_CARD;
-      if (typeof qc.y === 'undefined') {
-        throw new Error("QR_CARD.y is not defined in configuration");
-      }
-      
-      // Solid white fill first (opaque, covers trains bg)
-      doc.save();
-      rrect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
+      roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
       doc.fill(qc.bgColor);
-      doc.restore();
       
-      // Border stroke separately
-      doc.save();
       doc.strokeColor(qc.borderColor).lineWidth(qc.borderWidth);
-      rrect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
+      roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
       doc.stroke();
-      doc.restore();
-
-      // QR code — centered inside white card
-      const qrPayload = mode === "scan"
-        ? ticketCode
-        : JSON.stringify({ ticket_code: ticketCode, entity });
-
+      
+      // QR Code
+      const qrPayload = mode === "scan" ? ticketCode : JSON.stringify({ ticket_code: ticketCode, entity });
       const qrDataUrl = await QRCode.toDataURL(qrPayload, {
         errorCorrectionLevel: "H",
         margin: 1,
         width: C.QR.size * 3,
-        color: { dark: "#000000", light: "#FFFFFF" },
       });
       const qrBuf = Buffer.from(qrDataUrl.split(",")[1], "base64");
       const qrX = qc.x + (qc.width - C.QR.size) / 2;
       const qrY = qc.y + (qc.height - C.QR.size) / 2;
       doc.image(qrBuf, qrX, qrY, { width: C.QR.size });
-
-      // ═══════════════════════════════════════════════════════════════
-      // 5. NAME / COMPANY (NO ticket code - removed as requested)
-      // ═══════════════════════════════════════════════════════════════
-      const name = data.name || data.full_name || data.firstName
-        ? ((data.name || data.full_name ||
-           ((data.firstName || "") + " " + (data.lastName || ""))).trim().toUpperCase())
-        : "";
       
+      // ═══════════════════════════════════════════════════════════════
+      // 5. NAME and COMPANY (NO TICKET CODE)
+      // ═══════════════════════════════════════════════════════════════
+      const name = (data.name || data.full_name || 
+        (data.firstName ? `${data.firstName} ${data.lastName || ''}` : '')).trim().toUpperCase();
       const company = data.company || data.organization || data.companyName || "";
-
-      let textY = qc.y + qc.height + 12;
-
+      
       if (name) {
-        doc.fillColor("#111827").font("Helvetica-Bold").fontSize(17)
-           .text(name, 0, textY, { align: "center", width: C.PAGE.width });
-        textY += 21;
+        doc.fillColor("#000000")
+           .font("Helvetica-Bold")
+           .fontSize(C.TEXT_AREA.nameFontSize)
+           .text(name, 0, C.TEXT_AREA.nameY, { align: "center", width: C.PAGE.width });
       }
-
+      
       if (company) {
-        doc.fillColor("#4B5563").font("Helvetica").fontSize(10)
-           .text(company, 0, textY, { align: "center", width: C.PAGE.width });
-        textY += 15;
+        doc.fillColor("#666666")
+           .font("Helvetica")
+           .fontSize(C.TEXT_AREA.companyFontSize)
+           .text(company, 0, C.TEXT_AREA.companyY, { align: "center", width: C.PAGE.width });
       }
-
-      // Ticket code is NOT printed here - only in QR code
-
+      
       // ═══════════════════════════════════════════════════════════════
-      // 6. FOOTER LOGOS — white strip
+      // 6. FOOTER with Logos
       // ═══════════════════════════════════════════════════════════════
-      doc.rect(0, C.FOOTER_ZONE.y, C.PAGE.width, C.FOOTER_ZONE.height)
-         .fill(C.FOOTER_ZONE.bgColor);
-
-      doc.save()
-         .strokeColor(C.FOOTER_ZONE.borderTopColor).lineWidth(0.8)
-         .moveTo(0, C.FOOTER_ZONE.y)
-         .lineTo(C.PAGE.width, C.FOOTER_ZONE.y)
-         .stroke().restore();
-
-      // Left column - ORGANISED BY pill + Urban Infra logo
-      pillLabel(doc, C.LABEL_ORG.x, C.LABEL_ORG.y,
-        C.LABEL_ORG.text, C.LABEL_ORG.fontSize,
-        C.LABEL_ORG.pillBorder, C.LABEL_ORG.textColor, C.LABEL_ORG.radius);
-      safeImg(doc, C.LOGO_URBAN.path, C.LOGO_URBAN.x, C.LOGO_URBAN.y, C.LOGO_URBAN.width);
-
-      // Right column - IN ASSOCIATION WITH pill + Rail Chamber + Indian Railways logos
-      pillLabel(doc, C.LABEL_ASSOC.x, C.LABEL_ASSOC.y,
-        C.LABEL_ASSOC.text, C.LABEL_ASSOC.fontSize,
-        C.LABEL_ASSOC.pillBorder, C.LABEL_ASSOC.textColor, C.LABEL_ASSOC.radius);
-      safeImg(doc, C.LOGO_CHAMBER.path, C.LOGO_CHAMBER.x, C.LOGO_CHAMBER.y, C.LOGO_CHAMBER.width);
-      safeImg(doc, C.LOGO_RAILWAY.path, C.LOGO_RAILWAY.x, C.LOGO_RAILWAY.y, C.LOGO_RAILWAY.width);
-
+      doc.rect(0, C.FOOTER.y, C.PAGE.width, C.FOOTER.height).fill(C.FOOTER.bgColor);
+      
+      doc.strokeColor(C.FOOTER.borderTopColor).lineWidth(1)
+         .moveTo(0, C.FOOTER.y)
+         .lineTo(C.PAGE.width, C.FOOTER.y)
+         .stroke();
+      
+      // Organised By section
+      const org = C.ORGANISED_BY;
+      doc.fillColor("#666666")
+         .font("Helvetica-Bold")
+         .fontSize(7)
+         .text(org.label, org.labelX, org.labelY);
+      safeImage(doc, org.logoPath, org.logoX, org.logoY, org.logoWidth);
+      
+      // In Association With section
+      const assoc = C.ASSOCIATION;
+      doc.fillColor("#666666")
+         .font("Helvetica-Bold")
+         .fontSize(7)
+         .text(assoc.label, assoc.labelX, assoc.labelY);
+      safeImage(doc, assoc.logo1Path, assoc.logo1X, assoc.logo1Y, assoc.logo1Width);
+      safeImage(doc, assoc.logo2Path, assoc.logo2X, assoc.logo2Y, assoc.logo2Width);
+      
       // ═══════════════════════════════════════════════════════════════
-      // 7. RIBBON — full-width colored bar with bold role label
+      // 7. RIBBON with Role (VISITOR/DELEGATE/EXHIBITOR etc.)
       // ═══════════════════════════════════════════════════════════════
-      doc.rect(0, C.RIBBON.y, C.PAGE.width, C.RIBBON.height)
-         .fill(themeColor);
-
-      const ribbonTextY = C.RIBBON.y + Math.floor((C.RIBBON.height - C.RIBBON.textSize) / 2) - 2;
+      doc.rect(0, C.RIBBON.y, C.PAGE.width, C.RIBBON.height).fill(themeColor);
+      
+      const ribbonTextY = C.RIBBON.y + ((C.RIBBON.height - C.RIBBON.textSize) / 2) + 4;
       doc.fillColor(C.RIBBON.textColor)
          .font(C.RIBBON.font)
          .fontSize(C.RIBBON.textSize)
-         .text(ribbonLabel, 0, ribbonTextY,
-               { align: "center", width: C.PAGE.width,
-                 characterSpacing: C.RIBBON.letterSpacing });
-
+         .text(ribbonLabel, 0, ribbonTextY, { align: "center", width: C.PAGE.width });
+      
       doc.end();
-
+      
     } catch (err) {
-      console.error("[badgeGenerator] Error:", err);
+      console.error("Badge generation error:", err);
       reject(err);
     }
   });
