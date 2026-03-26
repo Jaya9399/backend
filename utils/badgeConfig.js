@@ -21,62 +21,50 @@ const PAGE = { width: 400, height: 628 };
 const TOP_STRIP = { y: 0, height: 14 };
 // color = themeColor at runtime
 
-// ── 2. Cream header ───────────────────────────────────────────────────────────
+// ── 2. Header with event title ───────────────────────────────────────────────
 const HEADER = {
-  y: 14, height: 152,
-  bgColor: "#FDF5DC",
+  y: 14, height: 140,
+  bgColor: "#FFFFFF",
   borderBottomColor: "#CCCCCC",
 };
 
-// RailTrans logo — left half, width ONLY (no height — PDFKit auto-scales)
+// Main Event Title
+const EVENT_TITLE = {
+  text: "RAIL & TRANSIT EXPO",
+  fontSize: 32,
+  font: "Helvetica-Bold",
+  color: "#1B3A8A",
+  y: 45,
+};
+
+// Date and Venue line
+const DATE_VENUE = {
+  text: "03-04 JULY 2026 | BHARAT MANDAPAM, NEW DELHI, INDIA",
+  fontSize: 10,
+  font: "Helvetica",
+  color: "#666666",
+  y: 95,
+};
+
+// RailTrans logo - top left
 const LOGO_RAILTRANS = {
   path: path.join(ASSETS_LOGO, "railtrans_logo_2026.png"),
-  x: 8, y: 18,
-  width: 182,
+  x: 12, y: 18,
+  width: 140,
 };
 
-// Subtle divider between left and right header halves
-const HEADER_DIVIDER = {
-  x: 196, y1: 20, y2: 160,
-  color: "#DDDDDD", lineWidth: 0.5,
-};
-
-// Date boxes
-const DATE_BOX = {
-  w: 44, h: 44,
-  bgColor: "#1B3A8A",
-  textColor: "#FFFFFF",
-  fontSize: 22,
-  box03: { x: 202, y: 20 },
-  box04: { x: 252, y: 20 },
-};
-
-// Bharat Mandapam image — right of date boxes, width only
+// Bharat Mandapam logo - top right
 const MANDAPAM = {
   path: path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x: 304, y: 18,
+  x: PAGE.width - 102, y: 18,
   width: 90,
 };
 
-// "JULY 2026"
-const MONTH_TEXT = {
-  x: 200, y: 72, width: 196,
-  text: "JULY 2026",
-  size: 24, font: "Helvetica-Bold", color: "#111111",
-};
-
-// "BHARAT MANDAPAM, NEW DELHI, INDIA"
-const VENUE_TEXT = {
-  x: 200, y: 102, width: 196,
-  text: "BHARAT MANDAPAM, NEW DELHI, INDIA",
-  size: 7.5, font: "Helvetica-Bold", color: "#444444",
-};
-
-// ── 3. White row + red pill tagline ──────────────────────────────────────────
-const TAGLINE_ROW = { y: 166, height: 36, bgColor: "#FFFFFF" };
+// ── 3. White row + tagline ──────────────────────────────────────────
+const TAGLINE_ROW = { y: 154, height: 36, bgColor: "#F5F5F5" };
 
 const TAGLINE_PILL = {
-  text: "Asia's Second Largest Event for Railways, Transportation & Semiconductor Industry",
+  text: "Asia's Largest Event for Railways, Transportation & Semiconductor Industry",
   bgColor: "#C8102E",
   textColor: "#FFFFFF",
   fontSize: 7.5,
@@ -88,7 +76,6 @@ const TAGLINE_PILL = {
 
 // ── 4. Body (light-blue gradient) ─────────────────────────────────────────────
 const BODY = {
-  // y is computed dynamically as TAGLINE_ROW.y + TAGLINE_ROW.height
   bgTop:    "#C6E4F5",
   bgBottom: "#EAF4FB",
 };
@@ -97,17 +84,15 @@ const BODY = {
 const BG_IMAGE = {
   path: path.join(ASSETS_BG, "bg.jpeg"),
   opacity: 0.58,
-  // x, y, width, height computed dynamically in generator
 };
 
 // White rounded QR card — centered in body
 const QR_CARD = {
   width: 230, height: 230,
-  // x, y computed dynamically: centered horizontally, positioned in upper body
   get x() { return (PAGE.width - this.width) / 2; },
   get y() { 
-    const bodyY = TAGLINE_ROW.y + TAGLINE_ROW.height; // Where body starts (202)
-    return bodyY + 25; // 25px from top of body
+    const bodyY = TAGLINE_ROW.y + TAGLINE_ROW.height;
+    return bodyY + 25;
   },
   radius: 10,
   bgColor: "#FFFFFF",
@@ -154,14 +139,13 @@ const LOGO_RAILWAY = {
 // ── 6. Ribbon ─────────────────────────────────────────────────────────────────
 const RIBBON = {
   y: 600, height: 28,
-  textSize: 40, textColor: "#FFFFFF",
-  font: "Helvetica-Bold", letterSpacing: 6,
+  textSize: 32, textColor: "#FFFFFF",
+  font: "Helvetica-Bold", letterSpacing: 2,
 };
 
 module.exports = {
   PAGE, TOP_STRIP,
-  HEADER, LOGO_RAILTRANS, HEADER_DIVIDER,
-  DATE_BOX, MANDAPAM, MONTH_TEXT, VENUE_TEXT,
+  HEADER, LOGO_RAILTRANS, MANDAPAM, EVENT_TITLE, DATE_VENUE,
   TAGLINE_ROW, TAGLINE_PILL,
   BODY, BG_IMAGE, QR_CARD, QR,
   FOOTER_ZONE, LABEL_ORG, LOGO_URBAN, LABEL_ASSOC, LOGO_CHAMBER, LOGO_RAILWAY,
