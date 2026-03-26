@@ -193,6 +193,11 @@ async function generateBadgePDF(entity, data, options = {}) {
 
       // White rounded QR card — drawn AFTER bg image so it covers it
       const qc = C.QR_CARD;
+      // Validate QR card position is defined
+      if (typeof qc.y === 'undefined') {
+        throw new Error("QR_CARD.y is not defined in configuration");
+      }
+      
       // Solid white fill first (opaque, covers trains bg)
       doc.save();
       rrect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
