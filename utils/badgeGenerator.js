@@ -10,7 +10,7 @@ const C      = require("./badgeConfig");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Safe image loader with better error handling
+// Improved safe image loader with better path resolution
 function safeImg(doc, filePath, x, y, width) {
   if (!filePath) {
     console.warn("[badge] No file path provided");
@@ -21,34 +21,28 @@ function safeImg(doc, filePath, x, y, width) {
   const possiblePaths = [
     filePath,
     path.join(process.cwd(), filePath),
+    path.join(__dirname, "..", filePath),
     path.join(__dirname, "..", "assets", "logos", path.basename(filePath)),
-    path.join(__dirname, "..", "..", "assets", "logos", path.basename(filePath))
+    path.join(process.cwd(), "assets", "logos", path.basename(filePath))
   ];
   
-  let loaded = false;
   for (const tryPath of possiblePaths) {
     if (fs.existsSync(tryPath)) {
       try {
         doc.image(tryPath, x, y, { width });
-        console.log(`[badge] Loaded image: ${tryPath}`);
-        loaded = true;
-        break;
+        console.log(`[badge] ✓ Loaded: ${path.basename(tryPath)}`);
+        return true;
       } catch (err) {
         console.warn(`[badge] Failed to load ${tryPath}:`, err.message);
       }
     }
   }
   
-  if (!loaded) {
-    console.warn(`[badge] Could not load image: ${path.basename(filePath)}`);
-    // Draw placeholder rectangle
-    doc.rect(x, y, width, width * 0.5).fill("#E5E7EB");
-    doc.fillColor("#9CA3AF").fontSize(8).text("Logo", x + 5, y + 5);
-  }
-  return loaded;
+  console.warn(`[badge] ✗ Missing: ${path.basename(filePath)}`);
+  return false;
 }
 
-// Rounded rectangle path
+// Rounded rectangle path — call .fill() or .stroke() after
 function rrect(doc, x, y, w, h, r) {
   r = Math.min(r, w / 2, h / 2);
   doc
@@ -60,7 +54,7 @@ function rrect(doc, x, y, w, h, r) {
     .closePath();
 }
 
-// Vertical gradient
+// Vertical gradient: stacked thin rectangles top→bottom
 function vGradient(doc, x, y, w, h, hexTop, hexBottom) {
   const steps = 60;
   const p = hex => {
@@ -81,7 +75,7 @@ function vGradient(doc, x, y, w, h, hexTop, hexBottom) {
   }
 }
 
-// Pill border label
+// Pill border label — "ORGANISED BY" / "IN ASSOCIATION WITH"
 function pillLabel(doc, x, y, text, fontSize, borderColor, textColor, radius) {
   doc.save();
   doc.font("Helvetica-Bold").fontSize(fontSize);
@@ -115,19 +109,23 @@ async function generateBadgePDF(entity, data, options = {}) {
 
       const { ribbon: ribbonLabel, color: themeColor } = getBadgeTheme({ entity, isPaid });
 
+      console.log(`[badge] Generating ${ribbonLabel} badge for ${data.name || 'Unknown'}`);
+
       const doc = new PDF({ size: [C.PAGE.width, C.PAGE.height], margin: 0 });
       const buffers = [];
       doc.on("data", chunk => buffers.push(chunk));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
       // ═══════════════════════════════════════════════════════════════
-      // 1. TOP COLOR STRIP
+      // 1. TOP COLOR STRIP (thin, same color as ribbon)
       // ═══════════════════════════════════════════════════════════════
       doc.rect(0, C.TOP_STRIP.y, C.PAGE.width, C.TOP_STRIP.height)
          .fill(themeColor);
 
       // ═══════════════════════════════════════════════════════════════
-      // 2. HEADER with Event Title
+      // 2. CREAM HEADER
+      //    LEFT half: RailTrans logo
+      //    RIGHT half: 03|04 boxes + Bharat Mandapam + JULY 2026 + venue
       // ═══════════════════════════════════════════════════════════════
       doc.rect(0, C.HEADER.y, C.PAGE.width, C.HEADER.height)
          .fill(C.HEADER.bgColor);
@@ -139,26 +137,43 @@ async function generateBadgePDF(entity, data, options = {}) {
          .lineTo(C.PAGE.width, C.HEADER.y + C.HEADER.height)
          .stroke().restore();
 
-      // RailTrans logo - left side
+      // RailTrans logo — left half
       safeImg(doc, C.LOGO_RAILTRANS.path, C.LOGO_RAILTRANS.x, C.LOGO_RAILTRANS.y, C.LOGO_RAILTRANS.width);
 
-      // Bharat Mandapam logo - right side
+      // Subtle vertical divider between header halves
+      doc.save()
+         .strokeColor(C.HEADER_DIVIDER.color).lineWidth(C.HEADER_DIVIDER.lineWidth)
+         .moveTo(C.HEADER_DIVIDER.x, C.HEADER_DIVIDER.y1)
+         .lineTo(C.HEADER_DIVIDER.x, C.HEADER_DIVIDER.y2)
+         .stroke().restore();
+
+      // Date box "03"
+      const b03 = C.DATE_BOX.box03;
+      doc.rect(b03.x, b03.y, C.DATE_BOX.w, C.DATE_BOX.h).fill(C.DATE_BOX.bgColor);
+      doc.fillColor(C.DATE_BOX.textColor).font("Helvetica-Bold").fontSize(C.DATE_BOX.fontSize)
+         .text("03", b03.x, b03.y + 10, { width: C.DATE_BOX.w, align: "center" });
+
+      // Date box "04"
+      const b04 = C.DATE_BOX.box04;
+      doc.rect(b04.x, b04.y, C.DATE_BOX.w, C.DATE_BOX.h).fill(C.DATE_BOX.bgColor);
+      doc.fillColor(C.DATE_BOX.textColor).font("Helvetica-Bold").fontSize(C.DATE_BOX.fontSize)
+         .text("04", b04.x, b04.y + 10, { width: C.DATE_BOX.w, align: "center" });
+
+      // Bharat Mandapam image — right of date boxes
       safeImg(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
 
-      // Main Event Title
-      doc.fillColor(C.EVENT_TITLE.color)
-         .font(C.EVENT_TITLE.font)
-         .fontSize(C.EVENT_TITLE.fontSize)
-         .text(C.EVENT_TITLE.text, 0, C.EVENT_TITLE.y, { align: "center", width: C.PAGE.width });
+      // "JULY 2026"
+      doc.fillColor(C.MONTH_TEXT.color).font(C.MONTH_TEXT.font).fontSize(C.MONTH_TEXT.size)
+         .text(C.MONTH_TEXT.text, C.MONTH_TEXT.x, C.MONTH_TEXT.y,
+               { width: C.MONTH_TEXT.width, align: "left" });
 
-      // Date and Venue
-      doc.fillColor(C.DATE_VENUE.color)
-         .font(C.DATE_VENUE.font)
-         .fontSize(C.DATE_VENUE.fontSize)
-         .text(C.DATE_VENUE.text, 0, C.DATE_VENUE.y, { align: "center", width: C.PAGE.width });
+      // "BHARAT MANDAPAM, NEW DELHI, INDIA"
+      doc.fillColor(C.VENUE_TEXT.color).font(C.VENUE_TEXT.font).fontSize(C.VENUE_TEXT.size)
+         .text(C.VENUE_TEXT.text, C.VENUE_TEXT.x, C.VENUE_TEXT.y,
+               { width: C.VENUE_TEXT.width, align: "left" });
 
       // ═══════════════════════════════════════════════════════════════
-      // 3. TAGLINE ROW with pill
+      // 3. WHITE ROW + CENTERED RED PILL TAGLINE
       // ═══════════════════════════════════════════════════════════════
       doc.rect(0, C.TAGLINE_ROW.y, C.PAGE.width, C.TAGLINE_ROW.height)
          .fill(C.TAGLINE_ROW.bgColor);
@@ -172,27 +187,27 @@ async function generateBadgePDF(entity, data, options = {}) {
       const pillY = C.TAGLINE_PILL.y;
       const pillH = C.TAGLINE_PILL.height;
 
+      // Fill pill background
       doc.save();
       rrect(doc, pillX, pillY, pillW, pillH, C.TAGLINE_PILL.radius);
       doc.fill(C.TAGLINE_PILL.bgColor);
       doc.restore();
 
-      doc.fillColor(C.TAGLINE_PILL.textColor)
-         .font(C.TAGLINE_PILL.font)
-         .fontSize(C.TAGLINE_PILL.fontSize)
+      // Pill text
+      doc.fillColor(C.TAGLINE_PILL.textColor).font(C.TAGLINE_PILL.font).fontSize(C.TAGLINE_PILL.fontSize)
          .text(C.TAGLINE_PILL.text,
                pillX + C.TAGLINE_PILL.padH,
                pillY + C.TAGLINE_PILL.padV,
                { width: pillW - C.TAGLINE_PILL.padH * 2, align: "center", lineBreak: false });
 
       // ═══════════════════════════════════════════════════════════════
-      // 4. BODY with gradient and QR card
+      // 4. BODY — light-blue gradient background
       // ═══════════════════════════════════════════════════════════════
       const bodyY = C.TAGLINE_ROW.y + C.TAGLINE_ROW.height;
       const bodyH = C.FOOTER_ZONE.y - bodyY;
       vGradient(doc, 0, bodyY, C.PAGE.width, bodyH, C.BODY.bgTop, C.BODY.bgBottom);
 
-      // Background image
+      // Trains bg image — ONLY in the lower portion of body, BEHIND QR card
       if (fs.existsSync(C.BG_IMAGE.path)) {
         const bgY = bodyY + bodyH * 0.42;
         const bgH = bodyH - (bgY - bodyY);
@@ -201,24 +216,26 @@ async function generateBadgePDF(entity, data, options = {}) {
         doc.restore();
       }
 
-      // White QR card
+      // White rounded QR card — drawn AFTER bg image so it covers it
       const qc = C.QR_CARD;
       if (typeof qc.y === 'undefined') {
         throw new Error("QR_CARD.y is not defined in configuration");
       }
       
+      // Solid white fill first (opaque, covers trains bg)
       doc.save();
       rrect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
       doc.fill(qc.bgColor);
       doc.restore();
       
+      // Border stroke separately
       doc.save();
       doc.strokeColor(qc.borderColor).lineWidth(qc.borderWidth);
       rrect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
       doc.stroke();
       doc.restore();
 
-      // QR code
+      // QR code — centered inside white card
       const qrPayload = mode === "scan"
         ? ticketCode
         : JSON.stringify({ ticket_code: ticketCode, entity });
@@ -235,33 +252,33 @@ async function generateBadgePDF(entity, data, options = {}) {
       doc.image(qrBuf, qrX, qrY, { width: C.QR.size });
 
       // ═══════════════════════════════════════════════════════════════
-      // 5. NAME and COMPANY (NO ticket code)
+      // 5. NAME / COMPANY (NO ticket code - removed as requested)
       // ═══════════════════════════════════════════════════════════════
       const name = data.name || data.full_name || data.firstName
         ? ((data.name || data.full_name ||
            ((data.firstName || "") + " " + (data.lastName || ""))).trim().toUpperCase())
-        : "VISITOR";
+        : "";
       
       const company = data.company || data.organization || data.companyName || "";
 
-      let textY = qc.y + qc.height + 15;
+      let textY = qc.y + qc.height + 12;
 
-      // Name
-      doc.fillColor("#111827").font("Helvetica-Bold").fontSize(18)
-         .text(name, 0, textY, { align: "center", width: C.PAGE.width });
-      textY += 24;
-
-      // Company (if exists)
-      if (company) {
-        doc.fillColor("#4B5563").font("Helvetica").fontSize(11)
-           .text(company, 0, textY, { align: "center", width: C.PAGE.width });
-        textY += 18;
+      if (name) {
+        doc.fillColor("#111827").font("Helvetica-Bold").fontSize(17)
+           .text(name, 0, textY, { align: "center", width: C.PAGE.width });
+        textY += 21;
       }
 
-      // NO ticket code printed - removed as requested
+      if (company) {
+        doc.fillColor("#4B5563").font("Helvetica").fontSize(10)
+           .text(company, 0, textY, { align: "center", width: C.PAGE.width });
+        textY += 15;
+      }
+
+      // Ticket code is NOT printed here - only in QR code
 
       // ═══════════════════════════════════════════════════════════════
-      // 6. FOOTER LOGOS
+      // 6. FOOTER LOGOS — white strip
       // ═══════════════════════════════════════════════════════════════
       doc.rect(0, C.FOOTER_ZONE.y, C.PAGE.width, C.FOOTER_ZONE.height)
          .fill(C.FOOTER_ZONE.bgColor);
@@ -272,11 +289,13 @@ async function generateBadgePDF(entity, data, options = {}) {
          .lineTo(C.PAGE.width, C.FOOTER_ZONE.y)
          .stroke().restore();
 
+      // Left column - ORGANISED BY pill + Urban Infra logo
       pillLabel(doc, C.LABEL_ORG.x, C.LABEL_ORG.y,
         C.LABEL_ORG.text, C.LABEL_ORG.fontSize,
         C.LABEL_ORG.pillBorder, C.LABEL_ORG.textColor, C.LABEL_ORG.radius);
       safeImg(doc, C.LOGO_URBAN.path, C.LOGO_URBAN.x, C.LOGO_URBAN.y, C.LOGO_URBAN.width);
 
+      // Right column - IN ASSOCIATION WITH pill + Rail Chamber + Indian Railways logos
       pillLabel(doc, C.LABEL_ASSOC.x, C.LABEL_ASSOC.y,
         C.LABEL_ASSOC.text, C.LABEL_ASSOC.fontSize,
         C.LABEL_ASSOC.pillBorder, C.LABEL_ASSOC.textColor, C.LABEL_ASSOC.radius);
@@ -284,12 +303,12 @@ async function generateBadgePDF(entity, data, options = {}) {
       safeImg(doc, C.LOGO_RAILWAY.path, C.LOGO_RAILWAY.x, C.LOGO_RAILWAY.y, C.LOGO_RAILWAY.width);
 
       // ═══════════════════════════════════════════════════════════════
-      // 7. RIBBON with role label
+      // 7. RIBBON — full-width colored bar with bold role label
       // ═══════════════════════════════════════════════════════════════
       doc.rect(0, C.RIBBON.y, C.PAGE.width, C.RIBBON.height)
          .fill(themeColor);
 
-      const ribbonTextY = C.RIBBON.y + Math.floor((C.RIBBON.height - C.RIBBON.textSize) / 2);
+      const ribbonTextY = C.RIBBON.y + Math.floor((C.RIBBON.height - C.RIBBON.textSize) / 2) - 2;
       doc.fillColor(C.RIBBON.textColor)
          .font(C.RIBBON.font)
          .fontSize(C.RIBBON.textSize)
