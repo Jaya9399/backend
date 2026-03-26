@@ -1,13 +1,23 @@
-// badgeTheme.js — ribbon label + color per entity/paid status
 module.exports = function getBadgeTheme({ entity, isPaid }) {
-  if (entity === "visitors") {
+  const normalized = (entity || "").toLowerCase();
+
+  if (["visitor", "visitors"].includes(normalized)) {
     return isPaid
-      ? { ribbon: "DELEGATE", color: "#C8102E" }   // Red
-      : { ribbon: "VISITOR",  color: "#1E40AF" };   // Blue
+      ? { ribbon: "DELEGATE", color: "#C8102E" }
+      : { ribbon: "VISITOR", color: "#1E40AF" };
   }
-  if (entity === "exhibitors") return { ribbon: "EXHIBITOR", color: "#2E7D32" };
-  if (entity === "partners")   return { ribbon: "PARTNER",   color: "#1565C0" };
-  if (entity === "speakers")   return { ribbon: "SPEAKER",   color: "#6A1B9A" };
-  if (entity === "awardees")   return { ribbon: "AWARDEE",   color: "#EF6C00" };
+
+  if (normalized === "exhibitor" || normalized === "exhibitors")
+    return { ribbon: "EXHIBITOR", color: "#2E7D32" };
+
+  if (normalized === "partner" || normalized === "partners")
+    return { ribbon: "PARTNER", color: "#1565C0" };
+
+  if (normalized === "speaker" || normalized === "speakers")
+    return { ribbon: "SPEAKER", color: "#6A1B9A" };
+
+  if (normalized === "awardee" || normalized === "awardees")
+    return { ribbon: "AWARDEE", color: "#EF6C00" };
+
   throw new Error(`Invalid badge entity: ${entity}`);
 };
