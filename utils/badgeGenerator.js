@@ -68,7 +68,7 @@ function drawHeader(doc) {
 
   doc.rect(0, H.y, C.PAGE.width, H.height).fill(H.bgColor);
 
-  // RailTrans logo — left column
+  // RailTrans logo — left
   safeImage(doc, C.RAILTRANS_LOGO.path, C.RAILTRANS_LOGO.x, C.RAILTRANS_LOGO.y, C.RAILTRANS_LOGO.width);
 
   // "6th EDITION" pill
@@ -80,17 +80,17 @@ function drawHeader(doc) {
   drawSquarePill(doc, dp.pill2.text, dp.pill2.x, dp.pill2.y, dp.pill2.width, dp.pill2.height,
     dp.pill2.bgColor, dp.pill2.textColor, dp.pill2.fontSize);
 
-  // "JULY 2026" — must fit between monthX and Mandapam logo (x:344)
-  // Available width = 344 - 272 - 4 = 68px. At fontSize 17 "JULY 2026" ≈ 67px. Perfect single line.
-  const monthW = C.MANDAPAM.x - dp.monthX - 4;
-  doc.fillColor("#000000").font("Helvetica-Bold").fontSize(17)
+  // "JULY 2026" — bold, to right of date squares, clamped to page width
+  const monthMaxWidth = C.PAGE.width - dp.monthX - 8;
+  doc.fillColor("#000000").font("Helvetica-Bold").fontSize(20)
      .text("JULY 2026", dp.monthX, dp.monthY,
-       { width: monthW, lineBreak: false });
+       { width: monthMaxWidth, lineBreak: false });
 
-  // Venue — smaller, below JULY 2026, same available width, allow wrap
-  doc.fillColor("#555555").font("Helvetica").fontSize(6)
-     .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp.venueX, dp.venueY,
-       { width: monthW, lineBreak: true });
+  // Venue — smaller, below JULY 2026
+  const venueMaxWidth = C.PAGE.width - dp.monthX - 8;
+  doc.fillColor("#555555").font("Helvetica").fontSize(6.5)
+     .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp.monthX, dp.venueY,
+       { width: venueMaxWidth, lineBreak: false });
 
   // Bharat Mandapam logo — top-right
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
@@ -102,13 +102,14 @@ function drawTagline(doc) {
 
   doc.font("Helvetica-Bold").fontSize(tg.fontSize);
   const tw = doc.widthOfString(tg.text);
-  const pw = Math.min(tw + 40, C.PAGE.width - 20);
+  const pw = Math.min(tw + 40, C.PAGE.width - 20); // never wider than page
   const ph = 18;
   const px = (C.PAGE.width - pw) / 2;
   const py = tg.y + (tg.height - ph) / 2;
 
   roundedRect(doc, px, py, pw, ph, 9);
   doc.fillAndStroke(tg.pillBgColor, tg.pillBorderColor);
+
   doc.fillColor(tg.textColor).font("Helvetica-Bold").fontSize(tg.fontSize)
      .text(tg.text, px + 10, py + (ph - tg.fontSize) / 2 + 1,
        { width: pw - 20, align: "center", lineBreak: false });
@@ -118,6 +119,8 @@ function drawBodyBackground(doc) {
   const bodyH = C.BODY.endY - C.BODY.startY;
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill(C.BODY.bgColor);
   safeImage(doc, C.BODY.bgImage, 0, C.BODY.startY, C.PAGE.width, { height: bodyH });
+
+  // White overlay — higher opacity = bg image less visible
   doc.save();
   doc.opacity(C.BODY.overlayOpacity / 255);
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill("#FFFFFF");
@@ -160,17 +163,14 @@ function drawNameAndCompany(doc, name, company) {
 }
 
 function drawFooter(doc) {
-  const org   = C.ORGANISED_BY;
-  const assoc = C.ASSOCIATION;
-
-  // Left: ORGANISED BY pill + logo
+  const org = C.ORGANISED_BY;
   drawPill(doc, org.label, org.labelX, org.labelY,
     org.labelBgColor, org.labelTextColor, org.labelFontSize, 16, 15);
   safeImage(doc, org.logoPath, org.logoX, org.logoY, org.logoWidth);
 
-  // Right: IN ASSOCIATION WITH pill + two logos side by side
+  const assoc = C.ASSOCIATION;
   drawPill(doc, assoc.label, assoc.labelX, assoc.labelY,
-    assoc.labelBgColor, assoc.labelTextColor, assoc.labelFontSize, 16, 15);
+    assoc.labelBgColor, assoc.labelTextColor, assoc.labelFontSize, 18, 15);
   safeImage(doc, assoc.logo1Path, assoc.logo1X, assoc.logo1Y, assoc.logo1Width);
   safeImage(doc, assoc.logo2Path, assoc.logo2X, assoc.logo2Y, assoc.logo2Width);
 }
@@ -178,22 +178,20 @@ function drawFooter(doc) {
 function drawRibbon(doc, themeColor, ribbonLabel) {
   const R = C.RIBBON;
 
-  // Draw ribbon shape
+  // Draw ribbon — starts at R.y, fills to bottom of page
   roundedRect(doc, 0, R.y, C.PAGE.width, R.height, R.borderRadius);
   doc.fill(themeColor);
 
-  // Measure text height so we can centre it precisely
-  doc.font(R.font).fontSize(R.textSize);
-  const textH = R.textSize;                        // approximate line height
-  const textY = R.y + (R.height - textH) / 2 - 2; // vertically centred
+  // Vertically centre text within ribbon
+  const textY = R.y + (R.height / 2) - (R.textSize / 2) - 2;
 
   // Subtle shadow
-  doc.fillColor("#00000033").font(R.font).fontSize(R.textSize)
-     .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width, lineBreak: false });
+  doc.fillColor("#000000").opacity(0.18).font(R.font).fontSize(R.textSize)
+     .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width });
 
   // Main label
-  doc.fillColor(R.textColor).font(R.font).fontSize(R.textSize)
-     .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width, lineBreak: false });
+  doc.fillColor(R.textColor).opacity(1).font(R.font).fontSize(R.textSize)
+     .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -208,6 +206,7 @@ async function generateBadgePDF(entity, data, options = {}) {
 
       const isPaid = Boolean(data.txId) || data.paid === true || Number(data.amount) > 0;
       const { ribbon: ribbonLabel, color: themeColor } = getBadgeTheme({ entity, isPaid });
+
       console.log(`[${ribbonLabel}] ${data.name || "(no name)"}`);
 
       const doc = new PDF({ size: [C.PAGE.width, C.PAGE.height], margin: 0 });

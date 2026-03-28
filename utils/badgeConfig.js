@@ -3,19 +3,24 @@
 
 const path = require("path");
 
+// Asset paths
 const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
+// ─── Page Size ────────────────────────────────────────────────────────────────
 const PAGE = { width: 400, height: 600 };
 
+// ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
 
+// ─── Header ──────────────────────────────────────────────────────────────────
 const HEADER = {
   y:       12,
   height:  88,
   bgColor: "#F5EFD6",
 };
 
+// RailTrans logo — left side, fills roughly left 40% of header
 const RAILTRANS_LOGO = {
   path:  path.join(ASSETS_LOGO, "railtranslogo.png"),
   x:     8,
@@ -23,35 +28,34 @@ const RAILTRANS_LOGO = {
   width: 148,
 };
 
+// Bharat Mandapam logo — top-right, pulled in so it doesn't clip
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x:     344,   // 400 - 56, safely inside page
+  x:     PAGE.width - 62,   // 338
   y:     14,
-  width: 52,
+  width: 54,
 };
 
+// Edition Pill — left of Mandapam
 const EDITION_PILL = {
   text:      "6th EDITION",
-  x:         192,
+  x:         195,
   y:         16,
   bgColor:   "#1B3A8A",
   textColor: "#FFFFFF",
   fontSize:  8,
 };
 
-// Date squares start at x:192, each 34px wide + 5px gap
-// "JULY 2026" starts immediately after pill2 (192+34+5+34+8 = 273)
-// but Mandapam is at x:344, so JULY 2026 has width = 344-273-4 = 67px — too tight for 20px font
-// Solution: shrink font or move things. We move monthX to 275, use fontSize 17, single line guaranteed.
+// Date Pills + text positions
 const DATE_PILLS = {
-  pill1:  { text: "03", x: 192, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
-  pill2:  { text: "04", x: 231, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
-  monthX: 272,
-  monthY: 38,
-  venueX: 272,
-  venueY: 60,   // well below JULY 2026 (38 + ~18px font height + 4)
+  pill1: { text: "03", x: 195, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
+  pill2: { text: "04", x: 234, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
+  monthX: 274,
+  monthY: 40,
+  venueY: 62,
 };
 
+// ─── Tagline Bar ─────────────────────────────────────────────────────────────
 const TAGLINE = {
   y:               100,
   height:          24,
@@ -63,82 +67,94 @@ const TAGLINE = {
   fontSize:        7,
 };
 
+// ─── Body ────────────────────────────────────────────────────────────────────
 const BODY = {
   startY:         124,
   endY:           490,
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
-  overlayOpacity: 215,
+  overlayOpacity: 185,   // 0–255; higher = more white = less visible bg image
 };
 
+// ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
-  width:       255,
-  height:      255,
+  width:       210,
+  height:      215,
   get x()     { return (PAGE.width - this.width) / 2; },
-  y:           132,
-  radius:      12,
+  y:           138,
+  radius:      10,
   bgColor:     "#FFFFFF",
-  borderColor: "#DDDDDD",
+  borderColor: "#CCCCCC",
   borderWidth: 0.8,
 };
 
-const QR = { size: 185 };
+const QR = { size: 140 };
 
-// QR card bottom: 132 + 255 = 387
+// ─── Text Areas ──────────────────────────────────────────────────────────────
 const TEXT_AREA = {
-  nameY:           395,
-  companyY:        412,
+  nameY:           362,
+  companyY:        380,
   nameFontSize:    13,
   companyFontSize: 9,
 };
 
-// Footer: pill at 430, logos at 448, logos are 40px tall max → bottom at 488
-// Ribbon starts at 490 — clean 2px gap
+// ─── Footer Logos with Pills ──────────────────────────────────────────────────
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
   labelX:         10,
-  labelY:         430,
+  labelY:         400,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
   logoX:          10,
-  logoY:          448,
-  logoWidth:      95,
+  logoY:          418,
+  logoWidth:      85,
 };
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
-  labelX:         205,
-  labelY:         430,
+  labelX:         200,
+  labelY:         400,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logo1Path:      path.join(ASSETS_LOGO, "rail_chamber.png"),
-  logo1X:         210,
-  logo1Y:         448,
-  logo1Width:     40,
+  logo1X:         205,
+  logo1Y:         418,
+  logo1Width:     48,
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
-  logo2X:         258,
-  logo2Y:         448,
-  logo2Width:     40,
+  logo2X:         260,
+  logo2Y:         416,
+  logo2Width:     48,
 };
 
-// Ribbon: auto-sizes to text — height is set in drawRibbon based on font+padding
+// ─── Ribbon ───────────────────────────────────────────────────────────────────
 const RIBBON = {
   y:            490,
-  height:       110,          // fills to page bottom (490+110=600)
-  textSize:     42,
+  height:       110,      // 490 + 110 = 600 (fills to bottom exactly)
+  textSize:     34,
   textColor:    "#FFFFFF",
   font:         "Helvetica-Bold",
-  borderRadius: 12,
-  paddingTop:   22,           // vertical padding above/below text inside ribbon
+  borderRadius: 14,       // subtle — not a big pill shape
 };
 
 module.exports = {
-  PAGE, TOP_STRIP, HEADER,
-  RAILTRANS_LOGO, MANDAPAM, EDITION_PILL, DATE_PILLS,
-  TAGLINE, BODY, QR_CARD, QR, TEXT_AREA,
-  ORGANISED_BY, ASSOCIATION, RIBBON,
-  ASSETS_BG, ASSETS_LOGO,
+  PAGE,
+  TOP_STRIP,
+  HEADER,
+  RAILTRANS_LOGO,
+  MANDAPAM,
+  EDITION_PILL,
+  DATE_PILLS,
+  TAGLINE,
+  BODY,
+  QR_CARD,
+  QR,
+  TEXT_AREA,
+  ORGANISED_BY,
+  ASSOCIATION,
+  RIBBON,
+  ASSETS_BG,
+  ASSETS_LOGO,
 };
