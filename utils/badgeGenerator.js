@@ -230,7 +230,7 @@ function drawRibbon(doc, themeColor, ribbonLabel) {
   doc.fill(themeColor);
 
   // Vertically centre text within ribbon
-  const textY = R.y + (R.height / 2) - (R.textSize / 2) - 2;
+  const textY = R.y + (R.height - R.textSize) / 2;
 
   // Subtle shadow
   doc.fillColor("#000000").opacity(0.18).font(R.font).fontSize(R.textSize)
