@@ -21,7 +21,7 @@ function safeImage(doc, filePath, x, y, width, extraOpts = {}) {
     path.join(__dirname, "assets", "logos", path.basename(filePath)),
     path.join(__dirname, "assets", "bg", path.basename(filePath)),
     path.join(process.cwd(), "public", "assets", "logos", path.basename(filePath)),
-    "C:\\Users\\Jaya Singh\\Demo\\backend\\assets\\logos\\" + path.basename(filePath),
+
   ];
   
   for (const p of candidates) {
@@ -112,12 +112,12 @@ function drawTagline(doc) {
   
   doc.font("Helvetica-Bold").fontSize(tg.fontSize);
   const tw = doc.widthOfString(tg.text);
-  const pw = Math.min(tw + 28, C.PAGE.width - 16);
-  const ph = tg.height - 8;
+  const pw = tw + 40;
+  const ph = 18;
   const px = (C.PAGE.width - pw) / 2;
   const py = tg.y + 4;
 
-  roundedRect(doc, px, py, pw, ph, ph / 2);
+  roundedRect(doc, px, py, pw, ph, 9);
   doc.fillAndStroke(tg.pillBgColor, tg.pillBorderColor);
 
   doc.fillColor(tg.textColor)
@@ -205,7 +205,7 @@ function drawRibbon(doc, themeColor, ribbonLabel) {
   doc.fill(themeColor);
   
   // Add text with slight shadow effect
-  const ribbonTextY = R.y + (R.height - R.textSize) / 2 - 1;
+  const ribbonTextY = R.y + (R.height / 2) - (R.textSize / 2) - 2;
   
   // Shadow
   doc.fillColor("#000000")
