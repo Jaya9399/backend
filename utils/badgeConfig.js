@@ -101,13 +101,13 @@ const TEXT_AREA = {
 // ─── Footer Logos with Pills ──────────────────────────────────────────────────
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
-  labelX:         10,
+  labelX:         20,
   labelY:         400,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
-  logoX:          10,
+  logoX:          20,
   logoY:          418,
   logoWidth:      85,
 };
