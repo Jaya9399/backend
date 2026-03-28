@@ -8,7 +8,7 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
-const PAGE = { width: 400, height: 600 };
+const PAGE = { width: 400, height: 590 };
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
@@ -79,7 +79,7 @@ const BODY = {
 // ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
   width:       210,
-  height:      230,
+  height:      210,
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -131,7 +131,7 @@ const ASSOCIATION = {
 
 const RIBBON = {
   y: 490,
-  height: 110,
+  height: 80,
   textSize: 30,
   borderRadius: 20,
   textColor: "#FFFFFF",  // Added textColor property
