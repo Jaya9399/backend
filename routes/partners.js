@@ -121,6 +121,7 @@ router.post('/step', async (req, res) => {
  * IMPORTANT: Default ACK email is sent in background ONLY if added_by_admin is false.
  * This is the "DEFAULT ACK EMAIL" (no ticket, no badge).
  */
+
 router.post('/', async (req, res) => {
   try {
     const db = await obtainDb();
@@ -144,26 +145,21 @@ router.post('/', async (req, res) => {
     const name = String(pick(['name', 'fullName', 'full_name', 'firstName', 'first_name']) || '').trim();
     const mobile = String(pick(['mobile', 'phone', 'contact', 'whatsapp']) || '').trim();
     const email = String(pick(['email', 'mail', 'emailId', 'email_id', 'contactEmail']) || '').trim();
-    // 🔐 OTP verification (skip for admin-created partners)
+    
+    // OTP verification (skip for admin-created partners)
     if (!body.added_by_admin) {
       if (!isEmailLike(email)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Valid email required',
-        });
+        return res.status(400).json({ success: false, error: 'Valid email required' });
       }
-
       const verificationToken = body.verificationToken;
-
       if (!checkOtpToken('partner', email, verificationToken)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Email not verified via OTP',
-        });
+        return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
     }
 
     const designation = String(pick(['designation', 'role', 'title']) || '').trim();
+    
+    // ✅ Extract company from various fields
     const company = String(pick(['companyName', 'company', 'organization', 'org']) || '').trim();
     const businessType = String(pick(['businessType', 'business_type', 'companyType']) || '').trim();
     const businessOther = String(pick(['businessOther', 'business_other', 'company_type_other']) || '').trim();
@@ -180,7 +176,7 @@ router.post('/', async (req, res) => {
       mobile: mobile || null,
       email: email || null,
       designation: designation || null,
-      company: company || null,
+      company: company || null,  // ✅ Root level company
       businessType: businessType || null,
       businessOther: businessOther || null,
       partnership: partnership || null,
@@ -197,7 +193,6 @@ router.post('/', async (req, res) => {
 
     const col = db.collection('partners');
 
-    // 🔥 ENFORCE ticket_code (MANDATORY)
     let ticket_code = body.ticket_code;
     if (!ticket_code) {
       do {
@@ -209,65 +204,52 @@ router.post('/', async (req, res) => {
     const r = await col.insertOne(doc);
     const insertedId = r && r.insertedId ? String(r.insertedId) : null;
 
-    // ✅ ALWAYS respond immediately and queue email (NO skip logic)
-    res.status(201).json(convertBigIntForJson({
+    res.status(201).json({
       success: true,
       insertedId,
       id: insertedId,
-      mail: { queued: true } // ✅ Email queued regardless of added_by_admin
-    }));
+      mail: { queued: true }
+    });
 
-    // Background: send default ACK email (NO ticket, NO badge) and notify admins
+    // Background email
     (async () => {
       try {
         if (!insertedId) return;
         const saved = await col.findOne({ _id: r.insertedId });
+        if (!saved) return;
 
-        if (!saved) {
-          console.warn('[partners] saved but cannot retrieve doc for email');
-          return;
-        }
+        console.log(`[DEBUG] Partner created with company: "${saved.company}"`);
 
         const to = saved.email || null;
         if (to && isEmailLike(to)) {
-          const mail = buildPartnerAckEmail({ name: saved.name || '', company: saved.company || '' });
-          try {
-            await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
-            console.debug('[partners] ack email sent to', to);
-            await col.updateOne({ _id: r.insertedId }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
-          } catch (e) {
-            console.error('[partners] ack email failed:', e && (e.message || e));
-            await col.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
+          const result = await sendTicketEmail({
+            entity: 'partners',
+            record: saved,
+            options: { forceSend: false, includeBadge: true }
+          });
+          
+          if (result && result.success) {
+            await col.updateOne({ _id: r.insertedId }, {
+              $unset: { email_failed: "", email_failed_at: "" },
+              $set: { email_sent_at: new Date() }
+            });
+          } else {
+            await col.updateOne({ _id: r.insertedId }, {
+              $set: { email_failed: true, email_failed_at: new Date() }
+            });
           }
-        } else {
-          console.warn('[partners] partner saved but no valid email; skipping ack mail');
         }
-
-        // Admin notifications - send for ALL records now
-        const adminEnv = (process.env.PARTNER_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
-        const adminAddrs = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-        if (adminAddrs.length) {
-          const subject = `New partner registration — ID: ${insertedId}${doc.added_by_admin ? ' (Admin Created)' : ''}`;
-          const html = `<p>New partner registered. </p><pre>${JSON.stringify(saved || body, null, 2)}</pre>`;
-          const text = `New partner\n${JSON.stringify(saved || body, null, 2)}`;
-          await Promise.all(adminAddrs.map(async (a) => {
-            try { await sendMail({ to: a, subject, text, html }); } catch (e) { console.error('[partners] admin notify error to', a, e && (e.message || e)); }
-          }));
-        } else {
-          console.debug('[partners] no admin emails configured');
-        }
-      } catch (bgErr) {
-        console.error('[partners] background error:', bgErr && (bgErr.stack || bgErr));
+      } catch (e) {
+        console.error('[partners] background email error:', e);
       }
     })();
 
     return;
   } catch (err) {
-    console.error('[partners] register error:', err && (err.stack || err));
+    console.error('[partners] register error:', err);
     return res.status(500).json({ success: false, error: err && err.message ? err.message : String(err) });
   }
 });
-
 /* ---------- Read / Update / Delete endpoints ---------- */
 
 /**
