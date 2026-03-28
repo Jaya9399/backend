@@ -28,12 +28,11 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 const defaultOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://railtrans-expo-yld6-git-master-railtransexpos-projects.vercel.app',
-  'https://railtransexpo.com',
-  'https://www.railtransexpo.com',
-  // IRMA India frontend (ticket upgrade, awardees, etc.)
+  // IRMA India frontend
   'https://www.irmaindia.com',
-  'https://irmaindia.com'
+  'https://irmaindia.com',
+  // Add backend URL for testing (optional)
+  'https://influential-panda-railtransexpo-39a8c6ee.koyeb.app'
 ];
 
 const envOrigins = (process.env.ALLOWED_ORIGINS || process.env.REACT_APP_API_BASE_URL || '')
@@ -49,20 +48,28 @@ function originAllowed(origin) {
   if (allowedOrigins.includes(origin)) return true;
   try {
     const host = new URL(origin).hostname.toLowerCase();
-    if (host.endsWith('.vercel.app')) return true;
-    // IRMA India: apex, www, and any subdomain (admin.irmaindia.com, etc.)
+    // Allow any IRMA India domain (www, admin, etc.)
     if (host === 'irmaindia.com' || host === 'www.irmaindia.com' || host.endsWith('.irmaindia.com')) {
       return true;
     }
+    // Allow any localhost for development
+    if (host === 'localhost' || host.startsWith('localhost:')) return true;
+    if (host === '127.0.0.1') return true;
   } catch { /* ignore */ }
   return false;
 }
-
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
-    if (process.env.NODE_ENV !== 'production') return cb(null, true);
-    if (originAllowed(origin)) return cb(null, true);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[CORS DEV] Allowing origin: ${origin}`);
+      return cb(null, true);
+    }
+    if (originAllowed(origin)) {
+      console.log(`[CORS PROD] ✅ Allowing origin: ${origin}`);
+      return cb(null, true);
+    }
+    console.log(`[CORS PROD] ❌ Blocking origin: ${origin}`);
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
