@@ -79,7 +79,7 @@ const BODY = {
 // ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
   width:       210,
-  height:      215,
+  height:      260,
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -88,7 +88,7 @@ const QR_CARD = {
   borderWidth: 0.8,
 };
 
-const QR = { size: 140 };
+const QR = { size: 120 };
 
 // ─── Text Areas ──────────────────────────────────────────────────────────────
 const TEXT_AREA = {
