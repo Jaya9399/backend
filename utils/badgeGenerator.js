@@ -120,7 +120,7 @@ function drawTagline(doc) {
 }
 
 function drawBodyBackground(doc) {
-  const bodyH = C.BODY.endY - C.BODY.startY;
+  const bodyH = C.PAGE.height - C.BODY.startY;
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill(C.BODY.bgColor);
   safeImage(doc, C.BODY.bgImage, 0, C.BODY.startY, C.PAGE.width, { height: bodyH });
 
@@ -131,7 +131,7 @@ function drawBodyBackground(doc) {
   doc.restore();
 }
 
-async function drawQRCard(doc, ticketCode, entity, mode) {
+async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   const qc = C.QR_CARD;
   roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
   doc.fill(qc.bgColor);
@@ -151,20 +151,33 @@ async function drawQRCard(doc, ticketCode, entity, mode) {
   const qrBuf = Buffer.from(qrDataUrl.split(",")[1], "base64");
   doc.image(qrBuf,
     qc.x + (qc.width - C.QR.size) / 2,
-    qc.y + (qc.height - C.QR.size) / 2,
+    qc.y + 20,
     { width: C.QR.size });
+
+    const qrY = qc.y + 20;
+    const textStartY = qrY + C.QR.size + 10;
+
+// NAME
+doc.fillColor("#000")
+  .font("Helvetica-Bold")
+  .fontSize(12)
+  .text(name, qc.x, textStartY, {
+    width: qc.width,
+    align: "center",
+    lineBreak: false
+  });
+
+// COMPANY (auto wrap)
+doc.fillColor("#555")
+  .font("Helvetica")
+  .fontSize(9)
+  .text(company, qc.x + 10, textStartY + 18, {
+    width: qc.width - 20,
+    align: "center"
+  });
 }
 
-function drawNameAndCompany(doc, name, company) {
-  if (name) {
-    doc.fillColor("#000000").font("Helvetica-Bold").fontSize(C.TEXT_AREA.nameFontSize)
-      .text(name, 0, C.TEXT_AREA.nameY, { align: "center", width: C.PAGE.width });
-  }
-  if (company) {
-    doc.fillColor("#555555").font("Helvetica").fontSize(C.TEXT_AREA.companyFontSize)
-      .text(company, 0, C.TEXT_AREA.companyY, { align: "center", width: C.PAGE.width });
-  }
-}
+
 
 function drawFooter(doc) {
   const org = C.ORGANISED_BY;
@@ -268,13 +281,13 @@ async function generateBadgePDF(entity, data, options = {}) {
       drawHeader(doc);
       drawTagline(doc);
       drawBodyBackground(doc);
-      await drawQRCard(doc, ticketCode, entity, mode);
+      await drawQRCard(doc, ticketCode, entity, mode, name, company);
 
       const name = (data.name || data.full_name ||
         (data.firstName ? `${data.firstName} ${data.lastName || ""}` : "")).trim().toUpperCase();
       const company = (data.company || data.organization || data.companyName || "").trim();
 
-      drawNameAndCompany(doc, name, company);
+      
       drawFooter(doc);
       drawRibbon(doc, themeColor, ribbonLabel);
 
