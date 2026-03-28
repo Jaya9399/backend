@@ -79,7 +79,7 @@ const BODY = {
 // ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
   width:       210,
-  height:      260,
+  height:      230,
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -131,7 +131,7 @@ const ASSOCIATION = {
 
 const RIBBON = {
   y: 490,
-  height: 70,
+  height: 110,
   textSize: 30,
   borderRadius: 20,
   textColor: "#FFFFFF",  // Added textColor property

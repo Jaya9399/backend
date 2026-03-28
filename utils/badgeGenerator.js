@@ -151,11 +151,11 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   const qrBuf = Buffer.from(qrDataUrl.split(",")[1], "base64");
   doc.image(qrBuf,
     qc.x + (qc.width - C.QR.size) / 2,
-    qc.y + 20,
+    qc.y + 16,
     { width: C.QR.size });
 
     const qrY = qc.y + 20;
-    const textStartY = qrY + C.QR.size + 30;
+    const textStartY = qrY + C.QR.size + 20;
 
 // NAME
 doc.fillColor("#000")
@@ -170,9 +170,10 @@ doc.fillColor("#000")
 doc.fillColor("#555")
   .font("Helvetica")
   .fontSize(9)
-  .text(company, qc.x + 10, textStartY + 22, {
+  .text(company, qc.x + 10, textStartY + 14, {
     width: qc.width - 20,
-    align: "center"
+    align: "center",
+    height: 20
   });
 }
 
