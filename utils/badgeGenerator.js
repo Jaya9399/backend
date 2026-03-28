@@ -281,11 +281,12 @@ async function generateBadgePDF(entity, data, options = {}) {
       drawHeader(doc);
       drawTagline(doc);
       drawBodyBackground(doc);
-      await drawQRCard(doc, ticketCode, entity, mode, name, company);
-
       const name = (data.name || data.full_name ||
         (data.firstName ? `${data.firstName} ${data.lastName || ""}` : "")).trim().toUpperCase();
       const company = (data.company || data.organization || data.companyName || "").trim();
+      await drawQRCard(doc, ticketCode, entity, mode, name, company);
+
+      
 
       
       drawFooter(doc);
