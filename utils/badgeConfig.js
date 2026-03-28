@@ -16,8 +16,15 @@ const TOP_STRIP = { y: 0, height: 10 };
 // ─── Header ──────────────────────────────────────────────────────────────────
 const HEADER = {
   y:       10,
-  height:  112,
+  height:  100,
   bgColor: "#F5EFD6",
+};
+
+const RAILTRANS_LOGO = {
+  path:  path.join(ASSETS_LOGO, "railtranslogo.png"),
+  x:     12,
+  y:     18,
+  width: 140,
 };
 
 const MANDAPAM = {
@@ -28,11 +35,14 @@ const MANDAPAM = {
 };
 
 const HEADER_TEXT = {
+  // Left branding block
   leftX:         10,
   superscriptY:  14,
   lineY:         14,
   railtransY:    30,
   expoLineY:     62,
+  
+  // Right date block
   dateBoxX1:     248,
   dateBoxX2:     291,
   dateBoxY:      18,
@@ -44,7 +54,7 @@ const HEADER_TEXT = {
 
 // ─── Tagline Bar ─────────────────────────────────────────────────────────────
 const TAGLINE = {
-  y:               122,
+  y:               110,
   height:          28,
   bgColor:         "#EFEFEF",
   text:            "Asia's Second Largest Event for Railways, Transportation & Semiconductor Industry",
@@ -56,8 +66,8 @@ const TAGLINE = {
 
 // ─── Body ────────────────────────────────────────────────────────────────────
 const BODY = {
-  startY:         150,
-  endY:           546,
+  startY:         138,
+  endY:           534,
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
   overlayOpacity: 225,
@@ -66,21 +76,21 @@ const BODY = {
 // ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
   width:       200,
-  height:      230,
+  height:      210,
   get x()     { return (PAGE.width - this.width) / 2; },
-  y:           162,
+  y:           150,
   radius:      10,
   bgColor:     "#FFFFFF",
   borderColor: "#CCCCCC",
   borderWidth: 0.8,
 };
 
-const QR = { size: 160 };
+const QR = { size: 150 };
 
 // ─── Text Areas ──────────────────────────────────────────────────────────────
 const TEXT_AREA = {
-  nameY:           406,
-  companyY:        426,
+  nameY:           370,
+  companyY:        390,
   nameFontSize:    14,
   companyFontSize: 9,
 };
@@ -89,35 +99,35 @@ const TEXT_AREA = {
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
   labelX:         12,
-  labelY:         462,
+  labelY:         412,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
   logoX:          12,
-  logoY:          478,
+  logoY:          428,
   logoWidth:      88,
 };
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
   labelX:         213,
-  labelY:         462,
+  labelY:         412,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
-  logo1Path:      path.join(ASSETS_LOGO, "rail_chamber.png"),
+  logo1Path:      path.join(ASSETS_LOGO, "img.png"),
   logo1X:         213,
-  logo1Y:         478,
+  logo1Y:         428,
   logo1Width:     60,
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
   logo2X:         280,
-  logo2Y:         476,
+  logo2Y:         426,
   logo2Width:     36,
 };
 
 // ─── Ribbon ──────────────────────────────────────────────────────────────────
 const RIBBON = {
-  y:        546,
-  height:   82,
+  y:        534,
+  height:   94,
   textSize: 36,
   textColor: "#FFFFFF",
   font:     "Helvetica-Bold",
@@ -127,6 +137,7 @@ module.exports = {
   PAGE,
   TOP_STRIP,
   HEADER,
+  RAILTRANS_LOGO,
   MANDAPAM,
   HEADER_TEXT,
   TAGLINE,

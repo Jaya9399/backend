@@ -21,6 +21,7 @@ function safeImage(doc, filePath, x, y, width, extraOpts = {}) {
     path.join(__dirname, "assets", "logos", path.basename(filePath)),
     path.join(__dirname, "assets", "bg", path.basename(filePath)),
     path.join(process.cwd(), "public", "assets", "logos", path.basename(filePath)),
+    "C:\\Users\\Jaya Singh\\Demo\\backend\\assets\\logos\\" + path.basename(filePath),
   ];
   
   for (const p of candidates) {
@@ -33,6 +34,7 @@ function safeImage(doc, filePath, x, y, width, extraOpts = {}) {
       }
     }
   }
+  console.warn(`⚠️ Image not found: ${path.basename(filePath)}`);
   return false;
 }
 
@@ -71,40 +73,19 @@ function drawHeader(doc) {
   // Cream background
   doc.rect(0, H.y, C.PAGE.width, H.height).fill(H.bgColor);
 
-  // Left branding
+  // Left side - RailTrans Logo
+  safeImage(doc, C.RAILTRANS_LOGO.path, C.RAILTRANS_LOGO.x, C.RAILTRANS_LOGO.y, C.RAILTRANS_LOGO.width);
+  
+  // Right side - 6th Edition indicator
   doc.fillColor("#333333").font("Helvetica-Oblique").fontSize(8)
-     .text("6", HT.leftX, HT.superscriptY, { continued: true })
+     .text("6", 280, HT.superscriptY, { continued: true })
      .font("Helvetica-Oblique").fontSize(6)
      .text("th", { continued: false });
-
+  
   doc.fillColor("#444444").font("Helvetica-Oblique").fontSize(10)
-     .text("─── 2026 ───", HT.leftX + 22, HT.lineY - 1);
+     .text("EDITION", 280, HT.lineY);
 
-  // Red chevron
-  const ax = HT.leftX;
-  const ay = HT.railtransY + 2;
-  doc.save()
-     .moveTo(ax, ay + 14)
-     .lineTo(ax + 14, ay)
-     .lineTo(ax + 14, ay + 28)
-     .closePath()
-     .fill("#C8102E");
-  doc.restore();
-
-  doc.rect(ax, ay + 12, 14, 4).fill("#C8102E");
-
-  // RailTrans text
-  const rtX = ax + 18;
-  const rtY = HT.railtransY;
-  doc.fillColor("#C8102E").font("Helvetica-BoldOblique").fontSize(28)
-     .text("Rail", rtX, rtY, { continued: true, lineBreak: false });
-  doc.fillColor("#1B3A8A").font("Helvetica-Bold").fontSize(28)
-     .text("Trans", { continued: false, lineBreak: false });
-
-  doc.fillColor("#1B3A8A").font("Helvetica-Bold").fontSize(8)
-     .text("RAIL & TRANSIT EXPO", ax, HT.expoLineY);
-
-  // Right date block
+  // Date boxes
   doc.rect(HT.dateBoxX1, HT.dateBoxY, HT.dateBoxW, HT.dateBoxH).fill("#1B3A8A");
   doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(20)
      .text("03", HT.dateBoxX1, HT.dateBoxY + 8,
@@ -121,6 +102,7 @@ function drawHeader(doc) {
   doc.fillColor("#555555").font("Helvetica").fontSize(6)
      .text("BHARAT MANDAPAM, NEW DELHI, INDIA", HT.dateBoxX1, HT.venueY);
 
+  // Bharat Mandapam logo
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
 }
 
