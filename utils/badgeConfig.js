@@ -8,7 +8,7 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
-const PAGE = { width: 400, height: 590 };
+const PAGE = { width: 400, height: 490 };
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
