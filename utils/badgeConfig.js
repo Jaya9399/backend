@@ -20,7 +20,7 @@ const HEADER = {
   bgColor: "#F5EFD6",
 };
 
-// RailTrans logo — left side, fills roughly left 40% of header
+// RailTrans logo — left side
 const RAILTRANS_LOGO = {
   path:  path.join(ASSETS_LOGO, "railtranslogo.png"),
   x:     8,
@@ -28,15 +28,15 @@ const RAILTRANS_LOGO = {
   width: 148,
 };
 
-// Bharat Mandapam logo — top-right, pulled in so it doesn't clip
+// Bharat Mandapam logo — top-right
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x:     PAGE.width - 62,   // 338
+  x:     PAGE.width - 62,
   y:     14,
   width: 54,
 };
 
-// Edition Pill — left of Mandapam
+// Edition Pill
 const EDITION_PILL = {
   text:      "6th EDITION",
   x:         195,
@@ -46,7 +46,7 @@ const EDITION_PILL = {
   fontSize:  8,
 };
 
-// Date Pills + text positions
+// Date Pills
 const DATE_PILLS = {
   pill1: { text: "03", x: 195, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
   pill2: { text: "04", x: 234, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
@@ -73,7 +73,7 @@ const BODY = {
   endY:           490,
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
-  overlayOpacity: 185,   // 0–255; higher = more white = less visible bg image
+  overlayOpacity: 185,
 };
 
 // ─── QR Card ─────────────────────────────────────────────────────────────────
@@ -130,10 +130,11 @@ const ASSOCIATION = {
 };
 
 const RIBBON = {
-  y: 510,        // push slightly down
-  height: 85,    // 🔥 reduced
-  textSize: 30,  // slightly smaller text
-  borderRadius: 20, // smoother curve
+  y: 510,
+  height: 85,
+  textSize: 30,
+  borderRadius: 20,
+  textColor: "#FFFFFF",  // Added textColor property
 };
 
 module.exports = {
