@@ -1,14 +1,5 @@
 // badgeGenerator.js — RailTrans Expo 2026
 "use strict";
-const PDF = require("pdfkit");
-PDF.prototype.font = function (src) {
-  try {
-    return this._font(src);
-  } catch (e) {
-    console.warn("Font failed, fallback to Helvetica");
-    return this._font("Helvetica");
-  }
-};
 const fs = require("fs");
 const path = require("path");
 const PDF = require("pdfkit");
