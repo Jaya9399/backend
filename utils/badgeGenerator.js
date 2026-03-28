@@ -154,8 +154,8 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
     qc.y + 16,
     { width: C.QR.size });
 
-    const qrY = qc.y + 20;
-    const textStartY = qrY + C.QR.size + 20;
+    const qrY = qc.y + 16;
+    const textStartY = qrY + C.QR.size + 8;
 
 // NAME
 doc.fillColor("#000")
@@ -170,10 +170,9 @@ doc.fillColor("#000")
 doc.fillColor("#555")
   .font("Helvetica")
   .fontSize(9)
-  .text(company, qc.x + 10, textStartY + 14, {
+  .text(company, qc.x + 10, textStartY + 12, {
     width: qc.width - 20,
     align: "center",
-    height: 20
   });
 }
 
