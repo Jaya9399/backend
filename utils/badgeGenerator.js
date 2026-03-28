@@ -172,7 +172,7 @@ function drawFooter(doc) {
   const assoc = C.ASSOCIATION;
 
   // ===== RIGHT SIDE BASE =====
-  const rightMargin = 4;
+  const rightMargin = 20;
   const rightEdge = C.PAGE.width - rightMargin;
   
   // ===== DRAW CAPSULE (RIGHT ALIGNED) =====
@@ -196,14 +196,14 @@ function drawFooter(doc) {
   
   // ===== DRAW LOGOS (RIGHT ALIGNED) =====
   const gap = 10;
-  const logoWidth = 32;
+  const logoWidth = 30;
   
   const totalWidth = (logoWidth * 2) + gap;
   
   // start from right side
   const startX = rightEdge - totalWidth + 6;
   
-  const logoY = 455;
+  const logoY = 435;
   
   safeImage(doc, assoc.logo1Path, startX, logoY, logoWidth);
   safeImage(doc, assoc.logo2Path, startX + logoWidth + gap, logoY, logoWidth);
