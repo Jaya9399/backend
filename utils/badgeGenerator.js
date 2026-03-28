@@ -19,6 +19,7 @@ function safeImage(doc, filePath, x, y, width, extraOpts = {}) {
     path.join(__dirname, "assets", "logos", path.basename(filePath)),
     path.join(__dirname, "assets", "bg", path.basename(filePath)),
     path.join(process.cwd(), "public", "assets", "logos", path.basename(filePath)),
+    "C:\\Users\\Jaya Singh\\Demo\\backend\\assets\\logos\\" + path.basename(filePath),
   ];
   for (const p of candidates) {
     if (fs.existsSync(p)) {
@@ -47,7 +48,7 @@ function drawPill(doc, text, x, y, bgColor, textColor, fontSize, padding = 14, h
   doc.fill(bgColor);
   doc.fillColor(textColor).font("Helvetica-Bold").fontSize(fontSize)
     .text(text, x + padding / 2, y + (height - fontSize) / 2 + 1, {
-      width: pw,   // 🔥 allow full width
+      width: pw,
       align: "center",
       lineBreak: false,
       ellipsis: false
@@ -83,7 +84,7 @@ function drawHeader(doc) {
   drawSquarePill(doc, dp.pill2.text, dp.pill2.x, dp.pill2.y, dp.pill2.width, dp.pill2.height,
     dp.pill2.bgColor, dp.pill2.textColor, dp.pill2.fontSize);
 
-  // "JULY 2026" — bold, to right of date squares, clamped to page width
+  // "JULY 2026" — bold, to right of date squares
   const monthMaxWidth = C.PAGE.width - dp.monthX - 8;
   doc.fillColor("#000000").font("Helvetica-Bold").fontSize(20)
     .text("JULY 2026", dp.monthX, dp.monthY,
@@ -105,7 +106,7 @@ function drawTagline(doc) {
 
   doc.font("Helvetica-Bold").fontSize(tg.fontSize);
   const tw = doc.widthOfString(tg.text);
-  const pw = Math.min(tw + 40, C.PAGE.width - 20); // never wider than page
+  const pw = Math.min(tw + 40, C.PAGE.width - 20);
   const ph = 18;
   const px = (C.PAGE.width - pw) / 2;
   const py = tg.y + (tg.height - ph) / 2;
@@ -123,7 +124,7 @@ function drawBodyBackground(doc) {
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill(C.BODY.bgColor);
   safeImage(doc, C.BODY.bgImage, 0, C.BODY.startY, C.PAGE.width, { height: bodyH });
 
-  // White overlay — higher opacity = bg image less visible
+  // White overlay
   doc.save();
   doc.opacity(C.BODY.overlayOpacity / 255);
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill("#FFFFFF");
@@ -171,36 +172,35 @@ function drawFooter(doc) {
     org.labelBgColor, org.labelTextColor, org.labelFontSize, 16, 15);
   safeImage(doc, org.logoPath, org.logoX, org.logoY, org.logoWidth);
 
-
   const assoc = C.ASSOCIATION;
 
-  // ===== SETTINGS =====
+  // Settings
   const rightMargin = 20;
   const logoWidth = 28;
-  const gap = 6; // 🔥 reduced gap
+  const gap = 6;
 
-  // ===== TEXT WIDTH =====
+  // Text width
   doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
   const textWidth = doc.widthOfString(assoc.label);
 
-  // 🔥 FORCE BIGGER CAPSULE WIDTH
+  // Force bigger capsule width
   const pillWidth = textWidth + 40;
 
-  // logos width
+  // Logos width
   const logosWidth = (logoWidth * 2) + gap;
 
-  // block width
+  // Block width
   const blockWidth = Math.max(pillWidth, logosWidth);
 
-  // ===== RIGHT ALIGN BLOCK =====
+  // Right align block
   const rightEdge = C.PAGE.width - rightMargin;
   const blockStartX = rightEdge - blockWidth;
 
-  // ===== CENTER ELEMENTS =====
+  // Center elements
   const pillX = blockStartX + (blockWidth - pillWidth) / 2;
   const logosX = blockStartX + (blockWidth - logosWidth) / 2;
 
-  // ===== DRAW CAPSULE =====
+  // Draw capsule
   const pillY = assoc.labelY;
 
   drawPill(
@@ -211,12 +211,12 @@ function drawFooter(doc) {
     assoc.labelBgColor,
     assoc.labelTextColor,
     assoc.labelFontSize,
-    24,   // 🔥 more padding
+    24,
     20
   );
 
-  // ===== LOGOS JUST BELOW CAPSULE =====
-  const logoY = pillY + 28; // 🔥 dynamic spacing (fixes big gap)
+  // Logos just below capsule
+  const logoY = pillY + 28;
 
   safeImage(doc, assoc.logo1Path, logosX, logoY, logoWidth);
   safeImage(doc, assoc.logo2Path, logosX + logoWidth + gap, logoY, logoWidth);
@@ -225,20 +225,26 @@ function drawFooter(doc) {
 function drawRibbon(doc, themeColor, ribbonLabel) {
   const R = C.RIBBON;
 
-  // Draw ribbon — starts at R.y, fills to bottom of page
+  // Draw ribbon with rounded corners at the top
   roundedRect(doc, 0, R.y, C.PAGE.width, R.height, R.borderRadius);
   doc.fill(themeColor);
 
-  // Vertically centre text within ribbon
+  // Vertically center text within ribbon
   const textY = R.y + (R.height - R.textSize) / 2;
 
-  // Subtle shadow
-  doc.fillColor("#000000").opacity(0.18).font(R.font).fontSize(R.textSize)
-    .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width });
+  // Subtle shadow effect
+  doc.fillColor("#000000")
+     .opacity(0.18)
+     .font("Helvetica-Bold")  // Fixed: Use standard PDF font
+     .fontSize(R.textSize)
+     .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width });
 
   // Main label
-  doc.fillColor(R.textColor).opacity(1).font(R.font).fontSize(R.textSize)
-    .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width });
+  doc.fillColor(R.textColor)
+     .opacity(1)
+     .font("Helvetica-Bold")  // Fixed: Use standard PDF font
+     .fontSize(R.textSize)
+     .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -261,6 +267,7 @@ async function generateBadgePDF(entity, data, options = {}) {
       doc.on("data", b => buffers.push(b));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
+      // Draw all sections
       doc.rect(0, C.TOP_STRIP.y, C.PAGE.width, C.TOP_STRIP.height).fill(themeColor);
       drawHeader(doc);
       drawTagline(doc);
