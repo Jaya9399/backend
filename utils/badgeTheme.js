@@ -1,3 +1,6 @@
+// badgeTheme.js — RailTrans Expo 2026
+"use strict";
+
 module.exports = function getBadgeTheme({ entity, isPaid }) {
   const normalized = (entity || "").toLowerCase();
 
