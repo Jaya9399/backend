@@ -120,7 +120,7 @@ function drawTagline(doc) {
 }
 
 function drawBodyBackground(doc) {
-  const bodyH = C.PAGE.height - C.BODY.startY;
+  const bodyH = C.RIBBON.y - C.BODY.startY;
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill(C.BODY.bgColor);
   safeImage(doc, C.BODY.bgImage, 0, C.BODY.startY, C.PAGE.width, { height: bodyH });
 
@@ -155,23 +155,22 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
     { width: C.QR.size });
 
     const qrY = qc.y + 20;
-    const textStartY = qrY + C.QR.size + 10;
+    const textStartY = qrY + C.QR.size + 30;
 
 // NAME
 doc.fillColor("#000")
   .font("Helvetica-Bold")
   .fontSize(12)
-  .text(name, qc.x, textStartY, {
-    width: qc.width,
-    align: "center",
-    lineBreak: false
+  .text(name, qc.x + 10, textStartY, {
+    width: qc.width - 20,
+    align: "center"
   });
 
 // COMPANY (auto wrap)
 doc.fillColor("#555")
   .font("Helvetica")
   .fontSize(9)
-  .text(company, qc.x + 10, textStartY + 18, {
+  .text(company, qc.x + 10, textStartY + 22, {
     width: qc.width - 20,
     align: "center"
   });
