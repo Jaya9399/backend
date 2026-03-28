@@ -43,12 +43,15 @@ function roundedRect(doc, x, y, w, h, r) {
 function drawPill(doc, text, x, y, bgColor, textColor, fontSize, padding = 14, height = 16) {
   doc.font("Helvetica-Bold").fontSize(fontSize);
   const tw = doc.widthOfString(text);
-  const pw = tw + padding;
+  const pw = tw + padding + 10;
   roundedRect(doc, x, y, pw, height, height / 2);
   doc.fill(bgColor);
   doc.fillColor(textColor).font("Helvetica-Bold").fontSize(fontSize)
-    .text(text, x + padding / 2, y + (height - fontSize) / 2 + 1,
-      { width: tw, lineBreak: false });
+    .text(text, x + padding / 2, y + (height - fontSize) / 2 + 1, {
+      width: pw - padding,   
+      align: "center",
+      lineBreak: false
+    });
 }
 
 function drawSquarePill(doc, text, x, y, w, h, bgColor, textColor, fontSize, radius = 6) {
