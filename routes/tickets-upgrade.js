@@ -14,7 +14,7 @@ const ALLOWED_ENTITIES = new Set([
   "visitors",
 ]);
 
-// ✅ FIX: Use absolute URL for backend API calls
+
 const API_BASE = (process.env.BACKEND_ORIGIN || process.env.API_BASE || "https://influential-panda-railtransexpo-39a8c6ee.koyeb.app").replace(/\/$/, "");
 const FRONTEND_BASE = (process.env.FRONTEND_BASE || process.env.APP_ORIGIN || "https://www.irmaindia.com").replace(/\/$/, "");
 
@@ -142,65 +142,72 @@ async function handleUpgrade(req, res) {
       couponCode: couponCode || null
     });
 
-    // PAYMENT PATH:  amount > 0 and no txId yet
-    if (amountNum > 0 && !txId) {
-      console.log("[tickets-upgrade] Creating payment order...");
+   
+    // In the PAYMENT PATH section, update the payload
+if (amountNum > 0 && !txId) {
+  console.log("[tickets-upgrade] Creating payment order...");
 
-      const payload = {
-        amount: amountNum,
-        currency: "INR",
-        description: `Ticket Upgrade - ${new_category}`,
-        reference_id: String(entity_id),
-        metadata: { 
-          entity_type: entityType, 
-          entity_id:  targetIdRaw,
-          new_category,
-          couponCode: couponCode || undefined
-        },
-        customer: { email: emailToUse },
-      };
+  // ✅ Fix: Properly format email and ensure it's valid
+  const buyerEmail = emailToUse && emailToUse.includes('@') ? emailToUse : 'customer@example.com';
+  
+  const payload = {
+    amount: amountNum,
+    currency: "INR",
+    description: `Ticket Upgrade - ${new_category}`,
+    reference_id: String(entity_id),
+    metadata: { 
+      entity_type: entityType, 
+      entity_id: targetIdRaw,
+      new_category,
+      couponCode: couponCode || undefined,
+      buyer_name: entityRow.name || entityRow.company || 'Customer',
+      email: buyerEmail
+    },
+    customer: { 
+      email: buyerEmail,
+      name: entityRow.name || entityRow.company || 'Customer'
+    },
+  };
 
-      try {
-        // ✅ FIX: Use absolute URL with API_BASE
-        const apiUrl = `${API_BASE}/api/payment/create-order`;
-        
-        console.log("[tickets-upgrade] Calling payment API:", apiUrl);
+  try {
+    const apiUrl = `${API_BASE}/api/payment/create-order`;
+    console.log("[tickets-upgrade] Calling payment API:", apiUrl);
+    console.log("[tickets-upgrade] Payment payload:", JSON.stringify(payload, null, 2));
 
-        const r = await fetch(apiUrl, {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json", 
-            "ngrok-skip-browser-warning": "69420" 
-          },
-          body:  JSON.stringify(payload),
-        });
+    const r = await fetch(apiUrl, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json", 
+        "ngrok-skip-browser-warning": "69420" 
+      },
+      body: JSON.stringify(payload),
+    });
 
-        const js = await r.json().catch(() => ({}));
+    const js = await r.json().catch(() => ({}));
+    console.log("[tickets-upgrade] Payment response:", js);
 
-        console.log("[tickets-upgrade] Payment response:", js);
-
-        if (!r.ok || !js.success) {
-          return res.status(502).json({ 
-            success: false, 
-            error: js.error || "Failed to create payment order", 
-            raw: js 
-          });
-        }
-
-        return res.json({ 
-          success: true, 
-          payment_required: true,
-          checkoutUrl: js.checkoutUrl || js.checkout_url || js.raw?.checkout_url,
-          order:  js 
-        });
-      } catch (e) {
-        console.error("[tickets-upgrade] Payment creation failed:", e);
-        return res.status(502).json({ 
-          success: false, 
-          error: "Failed to create payment order:  " + e.message 
-        });
-      }
+    if (!r.ok || !js.success) {
+      return res.status(502).json({ 
+        success: false, 
+        error: js.error || "Failed to create payment order", 
+        raw: js 
+      });
     }
+
+    return res.json({ 
+      success: true, 
+      payment_required: true,
+      checkoutUrl: js.checkoutUrl || js.checkout_url || js.raw?.checkout_url,
+      order: js 
+    });
+  } catch (e) {
+    console.error("[tickets-upgrade] Payment creation failed:", e);
+    return res.status(502).json({ 
+      success: false, 
+      error: "Failed to create payment order: " + e.message 
+    });
+  }
+}
 
     // ATOMIC: Upgrade & consume coupon
     const ticketsCol = db.collection("tickets");
@@ -322,7 +329,6 @@ async function handleUpgrade(req, res) {
       console.error("[tickets-upgrade] Entity update failed:", e);
     }
 
-    // ✅ Fetch updated entity to send complete ticket email
     let updatedEntity = null;
     try {
       const q = ObjectId.isValid(targetIdRaw) 
@@ -339,7 +345,6 @@ async function handleUpgrade(req, res) {
       };
     }
 
-    // ✅ Send complete ticket email with badge download
     if (emailToUse && updatedEntity) {
       try {
         console.log("[tickets-upgrade] Sending complete ticket email via sendTicketEmail...");
@@ -405,10 +410,10 @@ async function handleUpgrade(req, res) {
   }
 }
 
-// ✅ Correct endpoint (frontend expects /api/tickets/upgrade)
+
 router.post("/upgrade", handleUpgrade);
 
-// ✅ Backward compatibility (older clients may call POST /api/tickets)
+
 router.post("/", handleUpgrade);
 
 console.log("✅ tickets-upgrade.js LOADED");

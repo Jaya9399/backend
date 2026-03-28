@@ -83,7 +83,7 @@ async function dbQuery(sql, params = []) {
       }
       throw new Error("DB connection has no query()");
     } finally {
-      try { conn.release(); } catch (e) {}
+      try { conn.release(); } catch (e) { }
     }
   }
   throw new Error("Unsupported DB pool interface");
@@ -115,8 +115,14 @@ exports.createOrder = async (req, res) => {
     const amountStr = formatAmount(amountNum);
     const redirectUrl = callback_url || `${APP_ORIGIN}/payment-return`;
 
+
     // Determine webhook URL: explicit override wins, else build from BACKEND_ORIGIN
     let webhookUrl = INSTAMOJO_WEBHOOK_URL || `${BACKEND_ORIGIN}/api/payment/webhook`;
+
+    // Fix double slash in webhook URL
+    if (webhookUrl) {
+      webhookUrl = webhookUrl.replace(/([^:]\/)\/+/g, "$1");
+    }
 
     // If webhook resolves to localhost and user did not explicitly set INSTAMOJO_WEBHOOK_URL, do not send it
     const webhookSent = !(isLocalHost(webhookUrl) && !INSTAMOJO_WEBHOOK_URL);
@@ -125,6 +131,8 @@ exports.createOrder = async (req, res) => {
       console.warn("[Instamojo] webhook URL resolves to localhost. Will NOT send webhook param to provider.");
       webhookUrl = null;
     }
+
+    console.log("[Instamojo] Webhook URL after cleanup:", webhookUrl || "none");
 
     // If amount <= 0, we won't call Instamojo; create a local 'created' payment and return a local response
     if (amountNum <= 0 || !INSTAMOJO_API_KEY || !INSTAMOJO_AUTH_TOKEN) {
@@ -151,20 +159,69 @@ exports.createOrder = async (req, res) => {
     const params = new URLSearchParams();
     params.append("purpose", description || "Ticket");
     params.append("amount", amountStr);
-    // Instamojo expects buyer_name, email etc.
-    if (metadata && metadata.buyer_name) params.append("buyer_name", metadata.buyer_name);
-    params.append("email", metadata?.email || String(reference_id));
+
+    // ✅ Fix: Properly handle buyer name and email
+    let buyerName = "Customer";
+    let buyerEmail = "customer@example.com";
+
+    // Extract from metadata
+    if (metadata) {
+      if (metadata.buyer_name) buyerName = metadata.buyer_name;
+      else if (metadata.name) buyerName = metadata.name;
+      else if (metadata.customer && metadata.customer.name) buyerName = metadata.customer.name;
+
+      if (metadata.email) buyerEmail = metadata.email;
+      else if (metadata.customer && metadata.customer.email) buyerEmail = metadata.customer.email;
+    }
+
+    // Ensure email is valid
+    if (!buyerEmail || !buyerEmail.includes('@')) {
+      buyerEmail = "customer@example.com";
+      console.warn("[Instamojo] Invalid email, using fallback:", buyerEmail);
+    }
+
+    params.append("buyer_name", buyerName);
+    params.append("email", buyerEmail);
     params.append("redirect_url", redirectUrl);
-    if (webhookUrl) params.append("webhook", webhookUrl);
+
+    // Fix double slash in webhook URL
+    let cleanWebhookUrl = webhookUrl;
+    if (cleanWebhookUrl) {
+      cleanWebhookUrl = cleanWebhookUrl.replace(/([^:]\/)\/+/g, "$1");
+    }
+    if (cleanWebhookUrl) params.append("webhook", cleanWebhookUrl);
+
     params.append("send_email", "false");
     params.append("allow_repeated_payments", "false");
-    try { params.append("metadata", JSON.stringify(metadata || {})); } catch (e) {}
+
+    // Add metadata with enhanced info
+    const enhancedMetadata = {
+      ...metadata,
+      buyer_name: buyerName,
+      buyer_email: buyerEmail,
+      reference_id: reference_id
+    };
+    try {
+      params.append("metadata", JSON.stringify(enhancedMetadata));
+    } catch (e) {
+      console.warn("[Instamojo] Failed to stringify metadata:", e);
+    }
+
+    // Log what we're sending (for debugging)
+    console.log("[Instamojo] Payment request:", {
+      purpose: description,
+      amount: amountStr,
+      buyer_name: buyerName,
+      email: buyerEmail,
+      redirect_url: redirectUrl,
+      webhook: cleanWebhookUrl || "none"
+    });
 
     const url = `${INSTAMOJO_API_BASE}/api/1.1/payment-requests/`;
     const headers = instamojoHeaders();
 
     // Logging masked sensitive values
-    const mask = (s) => (s && s.length > 8 ? `${s.slice(0,4)}...${s.slice(-4)}` : "****");
+    const mask = (s) => (s && s.length > 8 ? `${s.slice(0, 4)}...${s.slice(-4)}` : "****");
     console.log("[Instamojo] createOrder POST", url);
     console.log("[Instamojo] webhook will be sent:", !!webhookUrl, webhookUrl || "(none)");
     console.log("[Instamojo] amount:", amountStr, "reference_id:", reference_id);
@@ -181,10 +238,22 @@ exports.createOrder = async (req, res) => {
     const data = instRes.data || {};
 
     if (statusCode < 200 || statusCode >= 300) {
-      console.error("[Instamojo] create payment-request failed:", statusCode, util.inspect(data, { depth: 2 }));
+      console.error("[Instamojo] create payment-request failed:", statusCode);
+      console.error("[Instamojo] Error details:", JSON.stringify(data, null, 2));
+
+      // Provide more helpful error message
+      let errorMessage = "Instamojo create failed";
+      if (data && data.message) {
+        if (typeof data.message === 'object') {
+          errorMessage = Object.values(data.message).flat().join(', ');
+        } else {
+          errorMessage = data.message;
+        }
+      }
+
       return res.status(502).json({
         success: false,
-        error: "Instamojo create failed",
+        error: errorMessage,
         provider_error: { status: statusCode, data },
         hint: webhookSent ? undefined : "Webhook was omitted because BACKEND_ORIGIN resolves to localhost. For local webhook testing set INSTAMOJO_WEBHOOK_URL to your public HTTPS webhook (e.g. ngrok URL)."
       });
@@ -398,7 +467,7 @@ exports.webhookHandler = async (req, res) => {
                 new_category: metaNewCategory,
                 amount: 0,
                 provider_tx: providerPaymentId || providerOrderId || null,
-              }, { timeout: 10000 }).catch(()=>{});
+              }, { timeout: 10000 }).catch(() => { });
             } catch (e) {
               console.warn("webhook -> tickets-upgrade call failed", e && e.message);
             }
@@ -410,10 +479,10 @@ exports.webhookHandler = async (req, res) => {
             (async () => {
               try {
                 // attempt confirm for some known entity routes; this is best-effort / idempotent
-                const possibleEntities = ["awardees","speakers","visitors","exhibitors","partners"];
+                const possibleEntities = ["awardees", "speakers", "visitors", "exhibitors", "partners"];
                 for (const ent of possibleEntities) {
                   try {
-                    await axios.post(`${BACKEND_ORIGIN}/api/${ent}/${encodeURIComponent(String(ref))}/confirm`, { txId: providerPaymentId || providerOrderId || null }, { timeout: 8000 }).catch(()=>{});
+                    await axios.post(`${BACKEND_ORIGIN}/api/${ent}/${encodeURIComponent(String(ref))}/confirm`, { txId: providerPaymentId || providerOrderId || null }, { timeout: 8000 }).catch(() => { });
                   } catch (e) { /* ignore */ }
                 }
               } catch (e) {
