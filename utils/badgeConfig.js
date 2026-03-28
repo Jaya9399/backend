@@ -8,7 +8,7 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
-const PAGE = { width: 400, height: 550 }; // Reduced from 590 to eliminate white space
+const PAGE = { width: 400, height: 580 }; // Slightly increased to accommodate everything
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
@@ -28,12 +28,12 @@ const RAILTRANS_LOGO = {
   width: 148,
 };
 
-// Bharat Mandapam logo — top-right
+// Bharat Mandapam logo — top-right (INCREASED SIZE)
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x:     PAGE.width - 62,
-  y:     14,
-  width: 54,
+  x:     PAGE.width - 82, 
+  y:     12, 
+  width: 74, 
 };
 
 // Edition Pill
@@ -70,7 +70,7 @@ const TAGLINE = {
 // ─── Body ────────────────────────────────────────────────────────────────────
 const BODY = {
   startY:         124,
-  endY:           462, // Adjusted based on new page height
+  endY:           500, 
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
   overlayOpacity: 185,
@@ -78,8 +78,8 @@ const BODY = {
 
 // ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
-  width:       210,
-  height:      220, // Increased to accommodate name + company
+  width:       250, 
+  height:      260, 
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -88,51 +88,51 @@ const QR_CARD = {
   borderWidth: 0.8,
 };
 
-const QR = { size: 120 };
+const QR = { size: 150 }; 
 
 // ─── Text Areas ──────────────────────────────────────────────────────────────
 const TEXT_AREA = {
   nameY:           362,
   companyY:        380,
-  nameFontSize:    13,
-  companyFontSize: 9,
+  nameFontSize:    16, 
+  companyFontSize: 12,
 };
 
 // ─── Footer Logos with Pills ──────────────────────────────────────────────────
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
   labelX:         20,
-  labelY:         380, // Moved up
+  labelY:         410, 
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
   logoX:          20,
-  logoY:          398, // Moved up
+  logoY:          428, 
   logoWidth:      85,
 };
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
   labelX:         235,
-  labelY:         380, // Moved up
+  labelY:         410, 
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logo1Path:      path.join(ASSETS_LOGO, "railchamber_logo.png"),
   logo1X:         205,
-  logo1Y:         398, // Moved up
+  logo1Y:         428, 
   logo1Width:     40,
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
   logo2X:         260,
-  logo2Y:         396, // Moved up
+  logo2Y:         426, 
   logo2Width:     40,
 };
 
 const RIBBON = {
-  y: 470, // Moved up to eliminate white space
-  height: 70, // Reduced height
-  textSize: 28, // Slightly smaller text
+  y: 510, 
+  height: 60, 
+  textSize: 28,
   borderRadius: 20,
   textColor: "#FFFFFF",
 };

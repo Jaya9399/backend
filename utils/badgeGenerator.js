@@ -141,7 +141,7 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
   doc.stroke();
 
-  // Generate QR code
+  // Generate QR code with larger size
   const qrPayload = mode === "scan"
     ? ticketCode
     : JSON.stringify({ ticket_code: ticketCode, entity });
@@ -149,81 +149,47 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   const qrDataUrl = await QRCode.toDataURL(qrPayload, {
     errorCorrectionLevel: "H",
     margin: 1,
-    width: C.QR.size * 3,
+    width: C.QR.size * 4,
   });
   const qrBuf = Buffer.from(qrDataUrl.split(",")[1], "base64");
   
   const qrX = qc.x + (qc.width - C.QR.size) / 2;
-  const qrY = qc.y + 12; // Moved up slightly
+  const qrY = qc.y + 20; // Adjusted for larger QR
   doc.image(qrBuf, qrX, qrY, { width: C.QR.size });
 
   // Calculate text starting position
-  const textStartY = qrY + C.QR.size + 8;
+  const textStartY = qrY + C.QR.size + 15;
   
-  console.log(`[DEBUG] Drawing name: "${name}"`);
-  console.log(`[DEBUG] Drawing company: "${company}"`);
-  console.log(`[DEBUG] QR Card bounds: y=${qc.y}, height=${qc.height}`);
-  console.log(`[DEBUG] Text start Y: ${textStartY}`);
-
-  // Draw NAME
+  // Draw NAME - BOLDER AND BIGGER
   doc.fillColor("#000")
     .font("Helvetica-Bold")
-    .fontSize(12);
+    .fontSize(C.TEXT_AREA.nameFontSize);
   
   // Calculate name height
   const nameHeight = doc.heightOfString(name, {
-    width: qc.width - 20,
+    width: qc.width - 30,
     align: "center"
   });
   
-  doc.text(name, qc.x + 10, textStartY, {
-    width: qc.width - 20,
+  doc.text(name, qc.x + 15, textStartY, {
+    width: qc.width - 30,
     align: "center"
   });
-  
-  console.log(`[DEBUG] Name height: ${nameHeight}`);
 
-  // Draw COMPANY if not empty
+  // Draw COMPANY - BOLDER AND BIGGER
   if (company && company.trim() !== "" && company !== "UNDEFINED" && company !== "NULL") {
-    doc.fillColor("#555")
-      .font("Helvetica")
-      .fontSize(9);
+    doc.fillColor("#333") // Darker for better contrast
+      .font("Helvetica-Bold") // Make company bold too
+      .fontSize(C.TEXT_AREA.companyFontSize);
     
     // Position company below name with spacing
-    const companyY = textStartY + nameHeight + 6;
+    const companyY = textStartY + nameHeight + 10;
     
-    console.log(`[DEBUG] Company Y position: ${companyY}`);
-    
-    // Calculate company height
-    const companyHeight = doc.heightOfString(company, {
-      width: qc.width - 20,
-      align: "center"
+    doc.text(company, qc.x + 15, companyY, {
+      width: qc.width - 30,
+      align: "center",
+      lineBreak: true
     });
-    
-    console.log(`[DEBUG] Company height: ${companyHeight}`);
-    console.log(`[DEBUG] Total height used: ${companyY + companyHeight - qc.y}`);
-    
-    // Check if it fits
-    if (companyY + companyHeight <= qc.y + qc.height - 8) {
-      doc.text(company, qc.x + 10, companyY, {
-        width: qc.width - 20,
-        align: "center",
-        lineBreak: true
-      });
-      console.log(`[DEBUG] Company drawn successfully`);
-    } else {
-      console.warn(`[WARNING] Company text may be truncated: "${company}"`);
-      // Try with smaller font
-      doc.fontSize(8);
-      doc.text(company, qc.x + 10, companyY, {
-        width: qc.width - 20,
-        align: "center",
-        lineBreak: true
-      });
-      console.log(`[DEBUG] Company drawn with smaller font`);
-    }
-  } else {
-    console.log(`[DEBUG] No company to draw (value: "${company}")`);
   }
 }
 
@@ -338,7 +304,7 @@ async function generateBadgePDF(entity, data, options = {}) {
                    data.fullName ||
                    "").trim().toUpperCase();
       
-      // Enhanced company extraction with more fallbacks and null checks
+      // Enhanced company extraction
       let company = (data.company ||
                     data.organization ||
                     data.companyName ||
@@ -351,7 +317,6 @@ async function generateBadgePDF(entity, data, options = {}) {
                     (data.data && data.data.company) ||
                     (data.data && data.data.organization) ||
                     (data.data && data.data.companyName) ||
-                    (data.data && data.data.employer) ||
                     "").trim().toUpperCase();
       
       // Remove any "null" or "undefined" strings
@@ -359,11 +324,7 @@ async function generateBadgePDF(entity, data, options = {}) {
         company = "";
       }
       
-      console.log(`[DEBUG] Final Company extracted: "${company}"`);
-      console.log(`[DEBUG] Data keys:`, Object.keys(data));
-      if (data.data) {
-        console.log(`[DEBUG] Data.data keys:`, Object.keys(data.data));
-      }
+      console.log(`[DEBUG] Final Company: "${company}"`);
       
       await drawQRCard(doc, ticketCode, entity, mode, name, company);
       drawFooter(doc);
