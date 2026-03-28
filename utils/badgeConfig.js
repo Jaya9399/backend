@@ -114,19 +114,19 @@ const ORGANISED_BY = {
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
-  labelX:         200,
+  labelX:         235,
   labelY:         400,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
-  logo1Path:      path.join(ASSETS_LOGO, "rail_chamber.png"),
+  logo1Path:      path.join(ASSETS_LOGO, "railchamber_logo.png"),
   logo1X:         205,
   logo1Y:         418,
-  logo1Width:     48,
+  logo1Width:     40,
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
   logo2X:         260,
   logo2Y:         416,
-  logo2Width:     48,
+  logo2Width:     40,
 };
 
 // ─── Ribbon ───────────────────────────────────────────────────────────────────

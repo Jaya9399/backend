@@ -170,9 +170,18 @@ function drawFooter(doc) {
 
   const assoc = C.ASSOCIATION;
   drawPill(doc, assoc.label, assoc.labelX, assoc.labelY,
-    assoc.labelBgColor, assoc.labelTextColor, assoc.labelFontSize, 18, 15);
-  safeImage(doc, assoc.logo1Path, assoc.logo1X, assoc.logo1Y, assoc.logo1Width);
-  safeImage(doc, assoc.logo2Path, assoc.logo2X, assoc.logo2Y, assoc.logo2Width);
+    assoc.labelBgColor, assoc.labelTextColor, assoc.labelFontSize, 12, 18);
+    const gap = 10;
+    const logoWidth = 40;
+    
+    // total width = 2 logos + gap
+    const totalWidth = (logoWidth * 2) + gap;
+    
+    // center under capsule
+    const startX = assoc.labelX + 10;
+    
+    safeImage(doc, assoc.logo1Path, startX, assoc.logo1Y, logoWidth);
+    safeImage(doc, assoc.logo2Path, startX + logoWidth + gap, assoc.logo1Y, logoWidth);
 }
 
 function drawRibbon(doc, themeColor, ribbonLabel) {
