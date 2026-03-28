@@ -129,14 +129,11 @@ const ASSOCIATION = {
   logo2Width:     40,
 };
 
-// ─── Ribbon ───────────────────────────────────────────────────────────────────
 const RIBBON = {
-  y:            490,
-  height:       110,      // 490 + 110 = 600 (fills to bottom exactly)
-  textSize:     34,
-  textColor:    "#FFFFFF",
-  font:         "Helvetica-Bold",
-  borderRadius: 14,       // subtle — not a big pill shape
+  y: 510,        // push slightly down
+  height: 85,    // 🔥 reduced
+  textSize: 30,  // slightly smaller text
+  borderRadius: 20, // smoother curve
 };
 
 module.exports = {
