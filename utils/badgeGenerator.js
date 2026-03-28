@@ -43,11 +43,11 @@ function roundedRect(doc, x, y, w, h, r) {
 function drawPill(doc, text, x, y, bgColor, textColor, fontSize, padding = 14, height = 16) {
   doc.font("Helvetica-Bold").fontSize(fontSize);
   const tw = doc.widthOfString(text);
-  const pw = tw + padding + 20;
+  const pw = tw + (padding * 2);
   roundedRect(doc, x, y, pw, height, height / 2);
   doc.fill(bgColor);
   doc.fillColor(textColor).font("Helvetica-Bold").fontSize(fontSize)
-    .text(text, x + padding / 2, y + (height - fontSize) / 2 + 1, {
+    .text(text, x, y + (height - fontSize) / 2 + 1, {
       width: pw,
       align: "center",
       lineBreak: false,
@@ -225,7 +225,10 @@ function drawFooter(doc) {
 function drawRibbon(doc, themeColor, ribbonLabel) {
   const R = C.RIBBON;
 
-  // Draw ribbon with rounded corners at the top
+
+  doc.rect(0, R.y, C.PAGE.width, R.height).fill(themeColor);
+
+  // then add rounded mask on top (optional smooth look)
   roundedRect(doc, 0, R.y, C.PAGE.width, R.height, R.borderRadius);
   doc.fill(themeColor);
 
@@ -234,17 +237,17 @@ function drawRibbon(doc, themeColor, ribbonLabel) {
 
   // Subtle shadow effect
   doc.fillColor("#000000")
-     .opacity(0.18)
-     .font("Helvetica-Bold")  // Fixed: Use standard PDF font
-     .fontSize(R.textSize)
-     .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width });
+    .opacity(0.18)
+    .font("Helvetica-Bold")  // Fixed: Use standard PDF font
+    .fontSize(R.textSize)
+    .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width });
 
   // Main label
   doc.fillColor(R.textColor)
-     .opacity(1)
-     .font("Helvetica-Bold")  // Fixed: Use standard PDF font
-     .fontSize(R.textSize)
-     .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width });
+    .opacity(1)
+    .font("Helvetica-Bold")  // Fixed: Use standard PDF font
+    .fontSize(R.textSize)
+    .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
