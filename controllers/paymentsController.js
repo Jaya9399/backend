@@ -1,28 +1,6 @@
-/**
- * backend/controllers/paymentsController.js
- *
- * Instamojo integration (uses public webhook URL from INSTAMOJO_WEBHOOK_URL or BACKEND_ORIGIN).
- *
- * Improvements made:
- * - Defensive DB helper that works with pool.getConnection() or pool.query()
- * - Accepts zero-amount orders (will not call Instamojo in that case; returns local checkoutUrl=null)
- * - Better logging and clearer responses / hints when webhook URL omitted because backend is local
- * - Safer JSON handling for metadata and webhook payload persistence
- * - Attempts to map payment -> visitor row for confirm/update
- *
- * Required env variables (set these securely):
- * - INSTAMOJO_API_KEY
- * - INSTAMOJO_AUTH_TOKEN
- * - INSTAMOJO_API_BASE    (https://www.instamojo.com for production)
- * - APP_ORIGIN           (frontend origin used for redirect_url fallback)
- * Optional:
- * - BACKEND_ORIGIN       (public backend origin, used to form webhook if INSTAMOJO_WEBHOOK_URL not set)
- * - INSTAMOJO_WEBHOOK_URL (explicit public webhook URL, e.g. https://abcd-1234.ngrok-free.dev/api/payment/webhook)
- */
-
+const { ObjectId } = require('mongodb');
 const axios = require("axios");
 const util = require("util");
-const pool = require("../db"); // adapt to your DB helper
 const fs = require("fs");
 const path = require("path");
 
@@ -48,6 +26,15 @@ function isLocalHost(url) {
   }
 }
 
+// Add this function after the imports
+async function obtainDb() {
+  const mongo = require('../utils/mongoClient');
+  if (!mongo) return null;
+  if (typeof mongo.getDb === 'function') return await mongo.getDb();
+  if (mongo.db) return mongo.db;
+  return null;
+}
+
 function formatAmount(amount) {
   const n = Number(amount) || 0;
   return n.toFixed(2);
@@ -61,40 +48,18 @@ function instamojoHeaders() {
   };
 }
 
-/**
- * DB helper: try pool.query, otherwise try pool.getConnection -> conn.query
- * Returns [rows, fields] or rows depending on driver. Normalizes to rows array or first result.
- */
-async function dbQuery(sql, params = []) {
-  // If pool has query method that returns promise
-  if (!pool) throw new Error("DB pool not available");
-  if (typeof pool.query === "function") {
-    // some pool implementations (mysql2/promise) return [rows, fields]
-    const out = await pool.query(sql, params);
-    return Array.isArray(out) && Array.isArray(out[0]) ? out[0] : out;
-  }
-  // fallback to getConnection
-  if (typeof pool.getConnection === "function") {
-    const conn = await pool.getConnection();
-    try {
-      if (typeof conn.query === "function") {
-        const out = await conn.query(sql, params);
-        return Array.isArray(out) && Array.isArray(out[0]) ? out[0] : out;
-      }
-      throw new Error("DB connection has no query()");
-    } finally {
-      try { conn.release(); } catch (e) { }
+// Add this after obtainDb in createOrder
+async function ensurePaymentsCollection(db) {
+  try {
+    const collections = await db.listCollections({ name: 'payments' }).toArray();
+    if (collections.length === 0) {
+      await db.createCollection('payments');
+      console.log('[DB] Created payments collection');
     }
+  } catch (err) {
+    console.warn('[DB] Could not ensure payments collection:', err.message);
   }
-  throw new Error("Unsupported DB pool interface");
 }
-
-/**
- * createOrder
- * - Creates an Instamojo payment request when amount > 0 and provider credentials exist.
- * - Persists a payments row in the DB (best-effort).
- * - For local dev when backend is not publicly reachable, webhook is omitted and a hint is returned.
- */
 exports.createOrder = async (req, res) => {
   try {
     const {
@@ -138,13 +103,25 @@ exports.createOrder = async (req, res) => {
     if (amountNum <= 0 || !INSTAMOJO_API_KEY || !INSTAMOJO_AUTH_TOKEN) {
       // persist payment row locally
       try {
-        await dbQuery(
-          `INSERT INTO payments (visitor_id, reference_id, provider, provider_order_id, amount, currency, status, metadata, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-          [visitor_id || null, reference_id || null, "local", null, amountNum, currency, "created", JSON.stringify(metadata || {})]
-        );
+        const db = await obtainDb();
+        if (db) {
+          const paymentsCol = db.collection('payments');
+          await paymentsCol.insertOne({
+            visitor_id: visitor_id || null,
+            reference_id: reference_id || null,
+            provider: "local", // Changed from "instamojo" to "local"
+            provider_order_id: null, // Fixed: was using undefined providerRequestId
+            amount: amountNum,
+            currency: currency,
+            status: "created",
+            metadata: metadata || {},
+            created_at: new Date(),
+            updated_at: new Date()
+          });
+          console.log("[DB] Payment record saved to MongoDB");
+        }
       } catch (dbErr) {
-        console.warn("[DB] Could not save local payment record (zero-amount):", dbErr && dbErr.message);
+        console.warn("[DB] Could not save payment record:", dbErr && dbErr.message);
       }
 
       return res.json({
@@ -154,7 +131,6 @@ exports.createOrder = async (req, res) => {
         hint: amountNum <= 0 ? "zero-amount order - no external checkout needed" : "no provider credentials",
       });
     }
-
     // Build Instamojo params
     const params = new URLSearchParams();
     params.append("purpose", description || "Ticket");
@@ -264,22 +240,25 @@ exports.createOrder = async (req, res) => {
     const checkoutUrl = pr.longurl || (pr.payment_request && pr.payment_request.longurl) || null;
     const providerRequestId = pr.id || (pr.payment_request && pr.payment_request.id) || null;
 
-    // Persist payment row (best-effort)
+    // Persist payment row (best-effort) - MongoDB version
     try {
-      await dbQuery(
-        `INSERT INTO payments (visitor_id, reference_id, provider, provider_order_id, amount, currency, status, metadata, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [
-          visitor_id || null,
-          reference_id || null,
-          "instamojo",
-          providerRequestId || null,
-          amountNum,
-          currency,
-          "created",
-          JSON.stringify(metadata || {}),
-        ]
-      );
+      const db = await obtainDb();
+      if (db) {
+        const paymentsCol = db.collection('payments');
+        await paymentsCol.insertOne({
+          visitor_id: visitor_id || null,
+          reference_id: reference_id || null,
+          provider: "instamojo",
+          provider_order_id: providerRequestId || null,
+          amount: amountNum,
+          currency: currency,
+          status: "created",
+          metadata: metadata || {},
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+        console.log("[DB] Payment record saved to MongoDB");
+      }
     } catch (dbErr) {
       console.warn("[DB] Could not save payment record:", dbErr && dbErr.message);
     }
@@ -300,8 +279,12 @@ exports.status = async (req, res) => {
     if (!reference_id) return res.status(400).json({ success: false, error: "reference_id required" });
 
     try {
-      const rows = await dbQuery(`SELECT * FROM payments WHERE reference_id = ? ORDER BY id DESC LIMIT 1`, [reference_id]);
-      const rec = Array.isArray(rows) ? rows[0] : rows;
+      const db = await obtainDb();
+      if (!db) return res.json({ success: true, status: "created" });
+
+      const paymentsCol = db.collection('payments');
+      const rec = await paymentsCol.findOne({ reference_id: reference_id });
+
       if (!rec) return res.json({ success: true, status: "created" });
       return res.json({ success: true, status: rec.status || "unknown", record: rec });
     } catch (dbErr) {
@@ -383,21 +366,33 @@ exports.webhookHandler = async (req, res) => {
     const newStatus = paid ? "paid" : "failed";
 
     // Update payments table: match by provider_order_id OR provider_payment_id OR reference_id
+    // Update payments collection - MongoDB version
     try {
-      await dbQuery(
-        `UPDATE payments SET provider_payment_id = COALESCE(?, provider_payment_id), status = ?, webhook_payload = ?, amount = COALESCE(?, amount), currency = COALESCE(?, currency), received_at = NOW(), updated_at = NOW()
-         WHERE provider_order_id = ? OR provider_payment_id = ? OR reference_id = ?`,
-        [
-          providerPaymentId || providerOrderId || null,
-          newStatus,
-          JSON.stringify(payload || {}),
-          amount || null,
-          currency || null,
-          providerOrderId || null,
-          providerPaymentId || null,
-          payload && payload.reference_id ? payload.reference_id : null,
-        ]
-      );
+      const db = await obtainDb();
+      if (db) {
+        const paymentsCol = db.collection('payments');
+        const filter = {
+          $or: [
+            { provider_order_id: providerOrderId },
+            { provider_payment_id: providerPaymentId },
+            { reference_id: payload?.reference_id }
+          ]
+        };
+
+        const update = {
+          $set: {
+            provider_payment_id: providerPaymentId || providerOrderId,
+            status: newStatus,
+            webhook_payload: payload || {},
+            amount: amount || null,
+            currency: currency || null,
+            received_at: new Date(),
+            updated_at: new Date()
+          }
+        };
+
+        await paymentsCol.updateOne(filter, update);
+      }
     } catch (dbErr) {
       console.error("[DB] webhook update error:", dbErr && dbErr.message);
     }
@@ -405,37 +400,57 @@ exports.webhookHandler = async (req, res) => {
     // Try to find visitor_id from payments row if available, then update visitors table
     try {
       let visitorIdToUpdate = null;
-      if (payload && payload.reference_id && /^\d+$/.test(String(payload.reference_id))) {
-        visitorIdToUpdate = Number(payload.reference_id);
+      if (payload && payload.reference_id) {
+        // Check if it's a MongoDB ObjectId
+        if (ObjectId.isValid(payload.reference_id)) {
+          visitorIdToUpdate = payload.reference_id;
+        } else if (/^\d+$/.test(String(payload.reference_id))) {
+          visitorIdToUpdate = Number(payload.reference_id);
+        } else {
+          visitorIdToUpdate = payload.reference_id;
+        }
       } else if (providerOrderId) {
-        const pRows = await dbQuery(`SELECT visitor_id FROM payments WHERE provider_order_id = ? ORDER BY id DESC LIMIT 1`, [providerOrderId]);
-        const pRec = Array.isArray(pRows) ? pRows[0] : pRows;
-        if (pRec && pRec.visitor_id) visitorIdToUpdate = pRec.visitor_id;
+        const db = await obtainDb();
+        if (db) {
+          const paymentsCol = db.collection('payments');
+          const pRec = await paymentsCol.findOne({ provider_order_id: providerOrderId });
+          if (pRec && pRec.visitor_id) visitorIdToUpdate = pRec.visitor_id;
+        }
       } else if (providerPaymentId) {
-        const pRows = await dbQuery(`SELECT visitor_id FROM payments WHERE provider_payment_id = ? ORDER BY id DESC LIMIT 1`, [providerPaymentId]);
-        const pRec = Array.isArray(pRows) ? pRows[0] : pRows;
-        if (pRec && pRec.visitor_id) visitorIdToUpdate = pRec.visitor_id;
-      }
-
-      if (!visitorIdToUpdate && payload && payload.email) {
-        const vRows = await dbQuery(`SELECT id FROM visitors WHERE email = ? ORDER BY id DESC LIMIT 1`, [payload.email]);
-        const vRec = Array.isArray(vRows) ? vRows[0] : vRows;
-        if (vRec && vRec.id) visitorIdToUpdate = vRec.id;
+        const db = await obtainDb();
+        if (db) {
+          const paymentsCol = db.collection('payments');
+          const pRec = await paymentsCol.findOne({ provider_payment_id: providerPaymentId });
+          if (pRec && pRec.visitor_id) visitorIdToUpdate = pRec.visitor_id;
+        }
       }
 
       if (visitorIdToUpdate) {
-        await dbQuery(
-          `UPDATE visitors SET txId = COALESCE(?, txId), payment_provider = ?, payment_status = ?, amount_paid = COALESCE(?, amount_paid), paid_at = CASE WHEN ? = 'paid' THEN NOW() ELSE paid_at END, payment_meta = ? WHERE id = ?`,
-          [
-            providerPaymentId || providerOrderId || null,
-            "instamojo",
-            newStatus,
-            amount || null,
-            newStatus,
-            JSON.stringify(payload || {}),
-            visitorIdToUpdate,
-          ]
-        );
+        try {
+          const db = await obtainDb();
+          if (db) {
+            const visitorsCol = db.collection('visitors');
+            const updateData = {
+              txId: providerPaymentId || providerOrderId || null,
+              payment_provider: "instamojo",
+              payment_status: newStatus,
+              amount_paid: amount || null,
+              payment_meta: payload || {},
+              updated_at: new Date()
+            };
+
+            if (newStatus === 'paid') {
+              updateData.paid_at = new Date();
+            }
+
+            await visitorsCol.updateOne(
+              { _id: new ObjectId(visitorIdToUpdate) },
+              { $set: updateData }
+            );
+          }
+        } catch (vErr) {
+          console.warn("[DB] visitor update after webhook failed:", vErr && vErr.message);
+        }
       }
     } catch (vErr) {
       console.warn("[DB] visitor update after webhook failed:", vErr && vErr.message);
