@@ -14,8 +14,9 @@ const ALLOWED_ENTITIES = new Set([
   "visitors",
 ]);
 
-const API_BASE = (process.env.API_BASE || process.env.BACKEND_URL || "").replace(/\/$/, "");
-const FRONTEND_BASE = (process.env.FRONTEND_BASE || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
+// ✅ FIX: Use absolute URL for backend API calls
+const API_BASE = (process.env.BACKEND_ORIGIN || process.env.API_BASE || "https://influential-panda-railtransexpo-39a8c6ee.koyeb.app").replace(/\/$/, "");
+const FRONTEND_BASE = (process.env.FRONTEND_BASE || process.env.APP_ORIGIN || "https://www.irmaindia.com").replace(/\/$/, "");
 
 async function obtainDb() {
   if (!mongo) return null;
@@ -154,16 +155,15 @@ async function handleUpgrade(req, res) {
           entity_type: entityType, 
           entity_id:  targetIdRaw,
           new_category,
-          couponCode: couponCode || undefined // meta supports coupon for easier later validation
+          couponCode: couponCode || undefined
         },
         customer: { email: emailToUse },
       };
 
       try {
-        const apiUrl = API_BASE 
-          ? `${API_BASE}/api/payment/create-order`
-          : "/api/payment/create-order";
-
+        // ✅ FIX: Use absolute URL with API_BASE
+        const apiUrl = `${API_BASE}/api/payment/create-order`;
+        
         console.log("[tickets-upgrade] Calling payment API:", apiUrl);
 
         const r = await fetch(apiUrl, {
