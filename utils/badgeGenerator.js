@@ -52,56 +52,56 @@ function roundedRect(doc, x, y, w, h, r) {
      .closePath();
 }
 
-function drawLabelPill(doc, text, x, y, bgColor, textColor) {
-  const fontSize = 6;
+function drawPill(doc, text, x, y, bgColor, textColor, fontSize, padding = 14, height = 16) {
   doc.font("Helvetica-Bold").fontSize(fontSize);
   const tw = doc.widthOfString(text);
-  const pw = tw + 14;
-  const ph = 14;
-  roundedRect(doc, x, y, pw, ph, 4);
+  const pw = tw + padding;
+  roundedRect(doc, x, y, pw, height, height / 2);
   doc.fill(bgColor);
   doc.fillColor(textColor)
      .font("Helvetica-Bold")
      .fontSize(fontSize)
-     .text(text, x + 7, y + 4, { width: tw, lineBreak: false });
+     .text(text, x + (padding / 2), y + (height - fontSize) / 2 + 1, 
+       { width: tw, lineBreak: false });
+}
+
+function drawSquarePill(doc, text, x, y, width, height, bgColor, textColor, fontSize, radius = 8) {
+  roundedRect(doc, x, y, width, height, radius);
+  doc.fill(bgColor);
+  doc.fillColor(textColor)
+     .font("Helvetica-Bold")
+     .fontSize(fontSize)
+     .text(text, x, y + (height - fontSize) / 2 + 1,
+       { width: width, align: "center", lineBreak: false });
 }
 
 function drawHeader(doc) {
   const H = C.HEADER;
-  const HT = C.HEADER_TEXT;
 
   // Cream background
   doc.rect(0, H.y, C.PAGE.width, H.height).fill(H.bgColor);
 
-  // Left side - RailTrans Logo
+  // RailTrans Logo
   safeImage(doc, C.RAILTRANS_LOGO.path, C.RAILTRANS_LOGO.x, C.RAILTRANS_LOGO.y, C.RAILTRANS_LOGO.width);
   
-  // Right side - 6th Edition indicator
-  doc.fillColor("#333333").font("Helvetica-Oblique").fontSize(8)
-     .text("6", 280, HT.superscriptY, { continued: true })
-     .font("Helvetica-Oblique").fontSize(6)
-     .text("th", { continued: false });
+  // Edition Pill
+  const ep = C.EDITION_PILL;
+  drawPill(doc, ep.text, ep.x, ep.y, ep.bgColor, ep.textColor, ep.fontSize, 18, 20);
   
-  doc.fillColor("#444444").font("Helvetica-Oblique").fontSize(10)
-     .text("EDITION", 280, HT.lineY);
-
-  // Date boxes
-  doc.rect(HT.dateBoxX1, HT.dateBoxY, HT.dateBoxW, HT.dateBoxH).fill("#1B3A8A");
-  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(20)
-     .text("03", HT.dateBoxX1, HT.dateBoxY + 8,
-       { width: HT.dateBoxW, align: "center", lineBreak: false });
-
-  doc.rect(HT.dateBoxX2, HT.dateBoxY, HT.dateBoxW, HT.dateBoxH).fill("#1B3A8A");
-  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(20)
-     .text("04", HT.dateBoxX2, HT.dateBoxY + 8,
-       { width: HT.dateBoxW, align: "center", lineBreak: false });
-
-  doc.fillColor("#000000").font("Helvetica-Bold").fontSize(18)
-     .text("JULY 2026", HT.dateBoxX1, HT.monthY);
-
-  doc.fillColor("#555555").font("Helvetica").fontSize(6)
-     .text("BHARAT MANDAPAM, NEW DELHI, INDIA", HT.dateBoxX1, HT.venueY);
-
+  // Date Square Pills
+  const dp = C.DATE_PILLS;
+  drawSquarePill(doc, dp.pill1.text, dp.pill1.x, dp.pill1.y, dp.pill1.width, dp.pill1.height,
+                 dp.pill1.bgColor, dp.pill1.textColor, dp.pill1.fontSize, 8);
+  drawSquarePill(doc, dp.pill2.text, dp.pill2.x, dp.pill2.y, dp.pill2.width, dp.pill2.height,
+                 dp.pill2.bgColor, dp.pill2.textColor, dp.pill2.fontSize, 8);
+  
+  // Month and Venue text
+  doc.fillColor("#000000").font("Helvetica-Bold").fontSize(16)
+     .text("JULY 2026", dp.pill1.x, dp.monthY);
+  
+  doc.fillColor("#666666").font("Helvetica").fontSize(6)
+     .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp.pill1.x, dp.venueY);
+  
   // Bharat Mandapam logo
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
 }
@@ -174,7 +174,7 @@ function drawNameAndCompany(doc, name, company) {
   }
   
   if (company) {
-    doc.fillColor("#333333")
+    doc.fillColor("#555555")
        .font("Helvetica")
        .fontSize(C.TEXT_AREA.companyFontSize)
        .text(company, 0, C.TEXT_AREA.companyY,
@@ -184,22 +184,42 @@ function drawNameAndCompany(doc, name, company) {
 
 function drawFooter(doc) {
   const org = C.ORGANISED_BY;
-  drawLabelPill(doc, org.label, org.labelX, org.labelY, org.labelBgColor, org.labelTextColor);
+  // Draw pill for ORGANISED BY
+  drawPill(doc, org.label, org.labelX, org.labelY, org.labelBgColor, org.labelTextColor, org.labelFontSize, 16, 15);
+  // Draw logo below the pill
   safeImage(doc, org.logoPath, org.logoX, org.logoY, org.logoWidth);
 
   const assoc = C.ASSOCIATION;
-  drawLabelPill(doc, assoc.label, assoc.labelX, assoc.labelY, assoc.labelBgColor, assoc.labelTextColor);
+  // Draw pill for IN ASSOCIATION WITH
+  drawPill(doc, assoc.label, assoc.labelX, assoc.labelY, assoc.labelBgColor, assoc.labelTextColor, assoc.labelFontSize, 18, 15);
+  // Draw logos below the pill
   safeImage(doc, assoc.logo1Path, assoc.logo1X, assoc.logo1Y, assoc.logo1Width);
   safeImage(doc, assoc.logo2Path, assoc.logo2X, assoc.logo2Y, assoc.logo2Width);
 }
 
 function drawRibbon(doc, themeColor, ribbonLabel) {
-  doc.rect(0, C.RIBBON.y, C.PAGE.width, C.RIBBON.height).fill(themeColor);
+  const R = C.RIBBON;
   
-  const ribbonTextY = C.RIBBON.y + (C.RIBBON.height - C.RIBBON.textSize) / 2 - 2;
-  doc.fillColor(C.RIBBON.textColor)
-     .font(C.RIBBON.font)
-     .fontSize(C.RIBBON.textSize)
+  // Draw full-width pill-shaped ribbon
+  roundedRect(doc, 0, R.y, C.PAGE.width, R.height, R.borderRadius);
+  doc.fill(themeColor);
+  
+  // Add text with slight shadow effect
+  const ribbonTextY = R.y + (R.height - R.textSize) / 2 - 1;
+  
+  // Shadow
+  doc.fillColor("#000000")
+     .opacity(0.2)
+     .font(R.font)
+     .fontSize(R.textSize)
+     .text(ribbonLabel, 1, ribbonTextY + 1,
+       { align: "center", width: C.PAGE.width });
+  
+  // Main text
+  doc.fillColor(R.textColor)
+     .opacity(1)
+     .font(R.font)
+     .fontSize(R.textSize)
      .text(ribbonLabel, 0, ribbonTextY,
        { align: "center", width: C.PAGE.width });
 }
