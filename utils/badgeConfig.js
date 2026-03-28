@@ -79,7 +79,7 @@ const BODY = {
 // ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
   width:       210,
-  height:      20,
+  height:      210,
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -130,7 +130,7 @@ const ASSOCIATION = {
 };
 
 const RIBBON = {
-  y: 0,
+  y: 490,
   height: 80,
   textSize: 30,
   borderRadius: 20,
