@@ -130,8 +130,8 @@ const ASSOCIATION = {
 };
 
 const RIBBON = {
-  y: 510,
-  height: 85,
+  y: 490,
+  height: 70,
   textSize: 30,
   borderRadius: 20,
   textColor: "#FFFFFF",  // Added textColor property

@@ -184,7 +184,7 @@ function drawFooter(doc) {
   const textWidth = doc.widthOfString(assoc.label);
 
   // Force bigger capsule width
-  const pillWidth = textWidth + 40;
+  const pillWidth = doc.widthOfString(assoc.label) + (24 * 2);
 
   // Logos width
   const logosWidth = (logoWidth * 2) + gap;
@@ -212,7 +212,7 @@ function drawFooter(doc) {
     assoc.labelTextColor,
     assoc.labelFontSize,
     24,
-    20
+    24
   );
 
   // Logos just below capsule
@@ -234,13 +234,6 @@ function drawRibbon(doc, themeColor, ribbonLabel) {
 
   // Vertically center text within ribbon
   const textY = R.y + (R.height - R.textSize) / 2;
-
-  // Subtle shadow effect
-  doc.fillColor("#000000")
-    .opacity(0.18)
-    .font("Helvetica-Bold")  // Fixed: Use standard PDF font
-    .fontSize(R.textSize)
-    .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width });
 
   // Main label
   doc.fillColor(R.textColor)
