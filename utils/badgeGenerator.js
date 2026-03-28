@@ -154,26 +154,26 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
     qc.y + 16,
     { width: C.QR.size });
 
-    const qrY = qc.y + 16;
-    const textStartY = qrY + C.QR.size + 8;
+  const qrY = qc.y + 16;
+  const textStartY = qrY + C.QR.size + 12;
 
-// NAME
-doc.fillColor("#000")
-  .font("Helvetica-Bold")
-  .fontSize(12)
-  .text(name, qc.x + 10, textStartY, {
-    width: qc.width - 20,
-    align: "center"
-  });
+  // NAME
+  doc.fillColor("#000")
+    .font("Helvetica-Bold")
+    .fontSize(12)
+    .text(name, qc.x + 10, textStartY, {
+      width: qc.width - 20,
+      align: "center"
+    });
 
-// COMPANY (auto wrap)
-doc.fillColor("#555")
-  .font("Helvetica")
-  .fontSize(9)
-  .text(company, qc.x + 10, textStartY + 12, {
-    width: qc.width - 20,
-    align: "center",
-  });
+  // COMPANY (auto wrap)
+  doc.fillColor("#555")
+    .font("Helvetica")
+    .fontSize(9)
+    .text(company, qc.x + 10, textStartY + 16, {
+      width: qc.width - 20,
+      align: "center",
+    });
 }
 
 
@@ -282,12 +282,20 @@ async function generateBadgePDF(entity, data, options = {}) {
       drawBodyBackground(doc);
       const name = (data.name || data.full_name ||
         (data.firstName ? `${data.firstName} ${data.lastName || ""}` : "")).trim().toUpperCase();
-      const company = (data.company || data.organization || data.companyName || "").trim();
+      const company = (data.company ||
+        data.organization ||
+        data.companyName ||
+        data.employer ||
+        data.affiliation ||
+        data.business ||
+        "").trim().toUpperCase(); // Add .toUpperCase() for consistency
+
+      console.log(`[DEBUG] Company extracted: "${company}"`); // Add debug log
       await drawQRCard(doc, ticketCode, entity, mode, name, company);
 
-      
 
-      
+
+
       drawFooter(doc);
       drawRibbon(doc, themeColor, ribbonLabel);
 
