@@ -3,190 +3,167 @@
 
 const path = require("path");
 
-// utils/ is one level inside BACKEND/
-// BACKEND/utils/badgeConfig.js  →  __dirname = BACKEND/utils
-// BACKEND/assets/bg             →  ../assets/bg
-// BACKEND/assets/logos          →  ../assets/logos
+// File lives at:  BACKEND/utils/badgeConfig.js
+// Assets live at: BACKEND/assets/bg/   and   BACKEND/assets/logos/
 const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
-// ─── Page ────────────────────────────────────────────────────────────────────
+// ─── Page  400 × 628 pt ──────────────────────────────────────────────────────
 const PAGE = { width: 400, height: 628 };
 
-// ─── Top colour strip (thin, matches ribbon colour) ──────────────────────────
-const TOP_STRIP = { y: 0, height: 14 };
+// ─── Layout map (all Y values) ───────────────────────────────────────────────
+//
+//   0  ┌──────────────────────┐
+//      │ TOP_STRIP   (h=10)   │  thin colour bar = ribbon colour
+//  10  ├──────────────────────┤
+//      │ HEADER      (h=108)  │  cream bg, RailTrans logo + Mandapam logo
+// 118  ├──────────────────────┤
+//      │ TAGLINE     (h=28)   │  light-grey bar, outline pill text
+// 146  ├──────────────────────┤
+//      │                      │
+//      │ BODY                 │  bg.jpeg (washed out) + QR card
+//      │   QR card   y=158    │
+//      │   name/co   y=408    │
+//      │   logos     y=458    │
+// 546  ├──────────────────────┤
+//      │ RIBBON      (h=82)   │  bold colour block, entity label
+// 628  └──────────────────────┘
 
-// ─── Header  (cream/beige background, full RailTrans branding logo) ───────────
-// The header uses a single pre-composed logo image (railtrans_logo_2026.png)
-// that already contains "6th · 2026 · RailTrans · RAIL & TRANSIT EXPO".
-// Dates, month/year and venue are part of that image, so we don't draw them
-// separately. If you have separate assets keep MONTH_YEAR / VENUE / DATE boxes
-// below and set enabled:true.
+// ─── Top strip ───────────────────────────────────────────────────────────────
+const TOP_STRIP = { y: 0, height: 10 };
+
+// ─── Header ──────────────────────────────────────────────────────────────────
 const HEADER = {
-  y: 14,
-  height: 118,          // slightly taller to fit the rich logo
-  bgColor: "#F5EFD6",   // cream/beige — matches target design
+  y:       10,
+  height:  108,
+  bgColor: "#F5EFD6",   // warm cream matching reference
 };
 
-// Full RailTrans branding logo (contains "6th 2026 | 03 04 JULY 2026 | BHARAT MANDAPAM …")
+// RailTrans branding logo — the PNG already contains
+// "6th · 2026 · RailTrans · RAIL & TRANSIT EXPO · 03 04 JULY 2026 · BHARAT MANDAPAM"
+// Width 230 keeps it in the left ~57% of the page width (400px).
 const LOGO_RAILTRANS = {
-  path: path.join(ASSETS_LOGO, "railtrans_logo_2026.png"),
-  x: 8,
-  y: 18,
-  width: 260,           // wider — let it dominate the left half
+  path:  path.join(ASSETS_LOGO, "railtrans_logo_2026.png"),
+  x:     8,
+  y:     14,
+  width: 230,
 };
 
-// Bharat Mandapam / venue logo (top-right corner)
+// Bharat Mandapam logo — top-right corner
 const MANDAPAM = {
-  path: path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x: PAGE.width - 88,
-  y: 22,
-  width: 78,
+  path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
+  x:     PAGE.width - 82,
+  y:     16,
+  width: 72,
 };
 
-// Date boxes — only used when the logo image does NOT include the dates.
-// Set enabled: false if the logo already contains them.
-const DATE_BOX_03 = {
-  enabled: false,
-  x: 210, y: 30, w: 38, h: 38,
-  text: "03",
-  bgColor: "#1B3A8A",
-  textColor: "#FFFFFF",
-  fontSize: 22,
-};
+// Standalone date/month/venue elements — DISABLED because the RailTrans logo
+// PNG already includes all of this. Set enabled:true only if you switch to a
+// simplified logo that does not contain date info.
+const DATE_BOX_03 = { enabled: false, x: 248, y: 22, w: 34, h: 34, text: "03", bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 20 };
+const DATE_BOX_04 = { enabled: false, x: 287, y: 22, w: 34, h: 34, text: "04", bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 20 };
+const MONTH_YEAR  = { enabled: false, x: 250, y: 62, text: "JULY 2026",                         fontSize: 12, font: "Helvetica-Bold", color: "#000000" };
+const VENUE       = { enabled: false, x: 250, y: 78, text: "BHARAT MANDAPAM, NEW DELHI, INDIA", fontSize: 6,  font: "Helvetica",      color: "#555555" };
 
-const DATE_BOX_04 = {
-  enabled: false,
-  x: 254, y: 30, w: 38, h: 38,
-  text: "04",
-  bgColor: "#1B3A8A",
-  textColor: "#FFFFFF",
-  fontSize: 22,
-};
-
-const MONTH_YEAR = {
-  enabled: false,
-  x: 215, y: 76,
-  text: "JULY 2026",
-  fontSize: 13,
-  font: "Helvetica-Bold",
-  color: "#000000",
-};
-
-const VENUE = {
-  enabled: false,
-  x: 215, y: 94,
-  text: "BHARAT MANDAPAM, NEW DELHI, INDIA",
-  fontSize: 6.5,
-  font: "Helvetica",
-  color: "#555555",
-};
-
-// ─── Tagline bar (sits just below header) ────────────────────────────────────
-// Target design: light-grey bar, text inside a thin outlined pill (not filled).
+// ─── Tagline bar ─────────────────────────────────────────────────────────────
 const TAGLINE = {
-  y: 132,               // immediately below header
-  height: 30,
-  bgColor: "#F0F0F0",   // light grey strip
-  text: "Asia's Second Largest Event for Railways, Transportation & Semiconductor Industry",
-  // Pill style — outline only (no fill), dark grey border
-  pillBgColor: "transparent",
-  pillBorderColor: "#888888",
-  pillBorderWidth: 0.8,
-  pillColor: "transparent",   // kept for backward compat — not used
-  textColor: "#333333",
-  fontSize: 6.5,
+  y:               118,
+  height:          28,
+  bgColor:         "#EFEFEF",
+  text:            "Asia's Second Largest Event for Railways, Transportation & Semiconductor Industry",
+  pillBgColor:     "#FFFFFF",   // white fill (keeps text readable)
+  pillBorderColor: "#999999",   // outline-only pill matching reference
+  pillBorderWidth: 0.7,
+  textColor:       "#222222",
+  fontSize:        6.5,
 };
 
-// ─── Body  (railway-track background image fills this entire zone) ────────────
-// The background image should cover from BODY.startY all the way to the bottom
-// of the footer zone (RIBBON.y), so the logos appear to "sit on the tracks".
+// ─── Body zone ───────────────────────────────────────────────────────────────
+// bg.jpeg spans the entire body zone (BODY.startY → RIBBON.y).
+// Because PDFKit has no native image opacity, we draw a near-white rectangle
+// on top of the image to wash it out (overlayOpacity controls darkness).
+//   overlayOpacity 0   = invisible overlay → full-strength image
+//   overlayOpacity 210 = heavy white wash  → ~18% image visibility (reference look)
 const BODY = {
-  startY: 162,          // just below tagline bar
-  bgColor: "#D6EAF8",   // fallback if image missing
-  bgImage: path.join(ASSETS_BG, "bg.jpeg"),
+  startY:         146,
+  endY:           546,         // = RIBBON.y
+  bgColor:        "#D8EEF8",   // solid fallback when bg.jpeg is missing
+  bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
+  overlayOpacity: 210,         // 0–255; 210 ≈ very faint, matching reference
 };
 
 // ─── QR Card ─────────────────────────────────────────────────────────────────
-// In the target design the card is tall, centred, and sits in the upper portion
-// of the body. The railway image is visible above, to the sides, and below.
+// Reference: card is ~52% of page width, square-ish, well padded.
 const QR_CARD = {
-  width: 230,
-  height: 300,          // taller card (target shows a lot of vertical space)
-  get x() { return (PAGE.width - this.width) / 2; },
-  y: 172,               // start near the top of the body zone
-  radius: 10,
-  bgColor: "#FFFFFF",
+  width:       210,
+  height:      240,
+  get x()     { return (PAGE.width - this.width) / 2; },
+  y:           158,
+  radius:      10,
+  bgColor:     "#FFFFFF",
   borderColor: "#CCCCCC",
   borderWidth: 0.8,
 };
 
-// QR image fits inside the card with padding
-const QR = { size: 200 };
+// QR image inside the card — centred with ~20 pt padding each side
+const QR = { size: 170 };
 
-// ─── Name & Company (below the QR card, overlaid on background) ──────────────
+// ─── Name & Company ──────────────────────────────────────────────────────────
+// Rendered below QR card, overlaid on the body background
 const TEXT_AREA = {
-  nameY: 482,           // just below the QR card bottom (172+300+10)
-  companyY: 506,
-  nameFontSize: 16,
-  companyFontSize: 10,
+  nameY:           408,   // QR_CARD.y + QR_CARD.height + 10 = 158+240+10
+  companyY:        428,
+  nameFontSize:    15,
+  companyFontSize: 9,
 };
 
-// ─── Footer (logos overlaid directly on the body background image) ───────────
-// There is NO separate white footer block in the target design.
-// Logos are placed on top of the railway background image.
+// ─── Footer logos zone ───────────────────────────────────────────────────────
+// Logos sit directly on the body background image — no separate white block.
 const FOOTER = {
-  y: 530,               // where logos start — still on the bg image
-  height: 60,
-  bgColor: "transparent",  // no white block
-  borderTopColor: "transparent",
-  useSeparateBlock: false,  // generator should check this flag
+  y:                455,
+  height:           91,   // 546 - 455
+  useSeparateBlock: false,
 };
 
-// ─── Organised By ────────────────────────────────────────────────────────────
+// "ORGANISED BY" — blue pill label + Urban Infra Group logo beneath it
 const ORGANISED_BY = {
-  label: "ORGANISED BY",
-  labelX: 12,
-  labelY: 532,
-  labelBgColor: "#1B3A8A",  // dark-blue pill background (target design)
+  label:          "ORGANISED BY",
+  labelX:         12,
+  labelY:         458,
+  labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
-  labelPadX: 6,
-  labelPadY: 3,
-  logoPath: path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
-  logoX: 12,
-  logoY: 548,
-  logoWidth: 88,
+  logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
+  logoX:          12,
+  logoY:          474,
+  logoWidth:      90,
 };
 
-// ─── In Association With ─────────────────────────────────────────────────────
+// "IN ASSOCIATION WITH" — blue pill label + two logos beneath it
 const ASSOCIATION = {
-  label: "IN ASSOCIATION WITH",
-  labelX: 218,
-  labelY: 532,
-  labelBgColor: "#1B3A8A",
+  label:          "IN ASSOCIATION WITH",
+  labelX:         215,
+  labelY:         458,
+  labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
-  labelPadX: 6,
-  labelPadY: 3,
 
-  logo1Path: path.join(ASSETS_LOGO, "rail_chamber.png"),
-  logo1X: 218,
-  logo1Y: 548,
-  logo1Width: 65,
+  logo1Path:  path.join(ASSETS_LOGO, "rail_chamber.png"),
+  logo1X:     215,
+  logo1Y:     474,
+  logo1Width: 62,
 
-  logo2Path: path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
-  logo2X: 292,
-  logo2Y: 546,
+  logo2Path:  path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
+  logo2X:     285,
+  logo2Y:     472,
   logo2Width: 38,
 };
 
-// ─── Ribbon  (large block at very bottom, entity label in big bold text) ──────
-// Target: ~80 px tall, full width, colour = theme colour, white text ~32 px
+// ─── Ribbon ──────────────────────────────────────────────────────────────────
 const RIBBON = {
-  y: 546,               // starts after the logos zone
-  height: 82,           // tall, prominent
-  textSize: 34,         // large bold label
+  y:        546,
+  height:   82,   // 628 - 546
+  textSize: 36,
   textColor: "#FFFFFF",
-  font: "Helvetica-Bold",
+  font:     "Helvetica-Bold",
 };
 
 // ─── Exports ─────────────────────────────────────────────────────────────────
