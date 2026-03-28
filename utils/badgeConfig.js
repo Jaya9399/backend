@@ -1,5 +1,6 @@
 // badgeConfig.js — RailTrans Expo 2026
 "use strict";
+const PDF = require("pdfkit");
 
 const path = require("path");
 

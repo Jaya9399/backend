@@ -1,6 +1,14 @@
 // badgeGenerator.js — RailTrans Expo 2026
 "use strict";
-
+const PDF = require("pdfkit");
+PDF.prototype.font = function (src) {
+  try {
+    return this._font(src);
+  } catch (e) {
+    console.warn("Font failed, fallback to Helvetica");
+    return this._font("Helvetica");
+  }
+};
 const fs = require("fs");
 const path = require("path");
 const PDF = require("pdfkit");
@@ -43,14 +51,15 @@ function roundedRect(doc, x, y, w, h, r) {
 function drawPill(doc, text, x, y, bgColor, textColor, fontSize, padding = 14, height = 16) {
   doc.font("Helvetica-Bold").fontSize(fontSize);
   const tw = doc.widthOfString(text);
-  const pw = tw + padding + 10;
+  const pw = tw + padding + 20;
   roundedRect(doc, x, y, pw, height, height / 2);
   doc.fill(bgColor);
   doc.fillColor(textColor).font("Helvetica-Bold").fontSize(fontSize)
     .text(text, x + padding / 2, y + (height - fontSize) / 2 + 1, {
-      width: pw - padding,   
+      width: pw,   // 🔥 allow full width
       align: "center",
-      lineBreak: false
+      lineBreak: false,
+      ellipsis: false
     });
 }
 
@@ -184,7 +193,7 @@ function drawFooter(doc) {
   const textWidth = doc.widthOfString(assoc.label);
 
   // 🔥 FORCE BIGGER CAPSULE WIDTH
-  const pillWidth = textWidth + 30;
+  const pillWidth = textWidth + 40;
 
   // logos width
   const logosWidth = (logoWidth * 2) + gap;
