@@ -168,20 +168,45 @@ function drawFooter(doc) {
     org.labelBgColor, org.labelTextColor, org.labelFontSize, 16, 15);
   safeImage(doc, org.logoPath, org.logoX, org.logoY, org.logoWidth);
 
+
   const assoc = C.ASSOCIATION;
-  drawPill(doc, assoc.label, assoc.labelX, assoc.labelY,
-    assoc.labelBgColor, assoc.labelTextColor, assoc.labelFontSize, 12, 18);
-    const gap = 10;
-    const logoWidth = 40;
-    
-    // total width = 2 logos + gap
-    const totalWidth = (logoWidth * 2) + gap;
-    
-    // center under capsule
-    const startX = assoc.labelX + 10;
-    
-    safeImage(doc, assoc.logo1Path, startX, assoc.logo1Y, logoWidth);
-    safeImage(doc, assoc.logo2Path, startX + logoWidth + gap, assoc.logo1Y, logoWidth);
+
+  // ===== RIGHT SIDE BASE =====
+  const rightMargin = 10;
+  const rightEdge = C.PAGE.width - rightMargin;
+  
+  // ===== DRAW CAPSULE (RIGHT ALIGNED) =====
+  doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
+  const textWidth = doc.widthOfString(assoc.label);
+  const labelWidth = textWidth + 12;
+  
+  const labelX = rightEdge - labelWidth;
+  
+  drawPill(
+    doc,
+    assoc.label,
+    labelX,
+    assoc.labelY,
+    assoc.labelBgColor,
+    assoc.labelTextColor,
+    assoc.labelFontSize,
+    12,
+    18
+  );
+  
+  // ===== DRAW LOGOS (RIGHT ALIGNED) =====
+  const gap = 10;
+  const logoWidth = 34;
+  
+  const totalWidth = (logoWidth * 2) + gap;
+  
+  // start from right side
+  const startX = rightEdge - totalWidth;
+  
+  const logoY = 450;
+  
+  safeImage(doc, assoc.logo1Path, startX, logoY, logoWidth);
+  safeImage(doc, assoc.logo2Path, startX + logoWidth + gap, logoY, logoWidth);
 }
 
 function drawRibbon(doc, themeColor, ribbonLabel) {
