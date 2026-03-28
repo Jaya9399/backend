@@ -171,42 +171,49 @@ function drawFooter(doc) {
 
   const assoc = C.ASSOCIATION;
 
-  // ===== RIGHT SIDE BASE =====
-  const rightMargin = 20;
-  const rightEdge = C.PAGE.width - rightMargin;
-  
-  // ===== DRAW CAPSULE (RIGHT ALIGNED) =====
-  doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
-  const textWidth = doc.widthOfString(assoc.label);
-  const labelWidth = textWidth + 12;
-  
-  const labelX = rightEdge - labelWidth;
-  
-  drawPill(
-    doc,
-    assoc.label,
-    labelX,
-    assoc.labelY,
-    assoc.labelBgColor,
-    assoc.labelTextColor,
-    assoc.labelFontSize,
-    20,
-    20
-  );
-  
-  // ===== DRAW LOGOS (RIGHT ALIGNED) =====
-  const gap = 10;
-  const logoWidth = 30;
-  
-  const totalWidth = (logoWidth * 2) + gap;
-  
-  // start from right side
-  const startX = rightEdge - totalWidth + 6;
-  
-  const logoY = 435;
-  
-  safeImage(doc, assoc.logo1Path, startX, logoY, logoWidth);
-  safeImage(doc, assoc.logo2Path, startX + logoWidth + gap, logoY, logoWidth);
+// ===== SETTINGS =====
+const rightMargin = 20;
+const gap = 10;
+const logoWidth = 30;
+const logoY = 435;
+
+// ===== CALCULATE BLOCK WIDTH =====
+doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
+const textWidth = doc.widthOfString(assoc.label);
+
+// pill width
+const pillWidth = textWidth + 20;
+
+// logos width
+const logosWidth = (logoWidth * 2) + gap;
+
+// FINAL block width = max of both
+const blockWidth = Math.max(pillWidth, logosWidth);
+
+// ===== ALIGN BLOCK TO RIGHT =====
+const rightEdge = C.PAGE.width - rightMargin;
+const blockStartX = rightEdge - blockWidth;
+
+// ===== CENTER ELEMENTS INSIDE BLOCK =====
+const pillX = blockStartX + (blockWidth - pillWidth) / 2;
+const logosX = blockStartX + (blockWidth - logosWidth) / 2;
+
+// ===== DRAW CAPSULE =====
+drawPill(
+  doc,
+  assoc.label,
+  pillX,
+  assoc.labelY,
+  assoc.labelBgColor,
+  assoc.labelTextColor,
+  assoc.labelFontSize,
+  20,
+  20
+);
+
+// ===== DRAW LOGOS =====
+safeImage(doc, assoc.logo1Path, logosX, logoY, logoWidth);
+safeImage(doc, assoc.logo2Path, logosX + logoWidth + gap, logoY, logoWidth);
 }
 
 function drawRibbon(doc, themeColor, ribbonLabel) {
