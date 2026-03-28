@@ -109,6 +109,7 @@ router.post('/step', async (req, res) => {
  * NOTE: Default ACK EMAIL is sent in background (no ticket, no badge) ALWAYS,
  * even if created by admin. Admin creation is tracked via added_by_admin flag.
  */
+
 router.post('/', async (req, res) => {
   try {
     const db = await obtainDb();
@@ -116,49 +117,25 @@ router.post('/', async (req, res) => {
     const col = db.collection('exhibitors');
 
     const body = req.body || {};
-    // 🔐 OTP verification (skip if admin-created)
+    
+    // OTP verification (skip if admin-created)
     if (!body.added_by_admin) {
       const email = (body.email || '').toString().trim();
-
       if (!isEmailLike(email)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Valid email required for OTP verification',
-        });
+        return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
       }
-
       const verificationToken = body.verificationToken;
       if (!checkOtpToken('exhibitor', email, verificationToken)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Email not verified via OTP',
-        });
+        return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
     }
 
-    console.info('[exhibitors] create payload keys:', Object.keys(body).length ? Object.keys(body) : '(empty)');
-
-    const pick = (keys = []) => {
-      for (const k of keys) {
-        if (Object.prototype.hasOwnProperty.call(body, k) && body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') {
-          return String(body[k]).trim();
-        }
-      }
-      for (const bk of Object.keys(body)) {
-        for (const k of keys) {
-          if (bk.toLowerCase() === String(k).toLowerCase() && body[bk] !== undefined && body[bk] !== null && String(body[bk]).trim() !== '') {
-            return String(body[bk]).trim();
-          }
-        }
-      }
-      return '';
-    };
-
+    // Extract company from various fields
     const companyVal = pick(['companyName', 'company', 'company_name', 'companyname', 'organization', 'org']);
     const otherVal = pick(['other', 'other_company', 'otherCompany']);
 
     if (!companyVal && !otherVal) {
-      return res.status(400).json({ success: false, error: 'companyName is required', message: 'Provide companyName or other' });
+      return res.status(400).json({ success: false, error: 'companyName is required' });
     }
 
     const FIELD_MAP = {
@@ -184,6 +161,7 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // ✅ Store company at root level
     doc.company = companyVal || '';
     if (otherVal) doc.other = otherVal;
 
@@ -195,6 +173,7 @@ router.post('/', async (req, res) => {
     doc.status = 'pending';
     doc.created_at = new Date();
     doc.updated_at = new Date();
+    
     let ticket_code = body.ticket_code;
     if (!ticket_code) {
       do {
@@ -202,74 +181,56 @@ router.post('/', async (req, res) => {
       } while (await col.findOne({ ticket_code }));
     }
     doc.ticket_code = ticket_code;
+    
     const insertRes = await col.insertOne(doc);
     const insertedId = insertRes && insertRes.insertedId ? String(insertRes.insertedId) : null;
 
-    // ✅ ALWAYS respond immediately and queue email (NO skip logic)
     res.status(201).json({
       success: true,
       insertedId,
       id: insertedId,
-      mail: { queued: true } // ✅ Email queued regardless of added_by_admin
+      mail: { queued: true }
     });
 
-    // Background: send default ACK email (NO ticket, NO badge) and notify admins
+    // Background email
     (async () => {
       try {
         if (!insertedId) return;
         const saved = await col.findOne({ _id: toObjectId(insertedId) });
+        if (!saved) return;
 
-        if (!saved) {
-          console.warn('[exhibitors] saved but cannot retrieve doc for email');
-          return;
-        }
+        console.log(`[DEBUG] Exhibitor created with company: "${saved.company}"`);
 
         const to = saved.email || body.email || null;
-        const name = (saved.name || saved.company) || companyVal || '';
-
         if (to && isEmailLike(to)) {
-          const mail = buildExhibitorAckEmail({ name });
-          try {
-            await sendMail({ to, subject: mail.subject, text: mail.text, html: mail.html, from: mail.from });
-            console.debug('[exhibitors] ack email sent to', to);
-            await col.updateOne({ _id: toObjectId(insertedId) }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
-          } catch (e) {
-            console.error('[exhibitors] ack email failed:', e && (e.message || e));
-            await col.updateOne({ _id: toObjectId(insertedId) }, { $set: { email_failed: true, email_failed_at: new Date() } });
+          const result = await sendTicketEmail({
+            entity: 'exhibitors',
+            record: saved,
+            options: { forceSend: false, includeBadge: true }
+          });
+          
+          if (result && result.success) {
+            await col.updateOne({ _id: toObjectId(insertedId) }, {
+              $unset: { email_failed: "", email_failed_at: "" },
+              $set: { email_sent_at: new Date() }
+            });
+          } else {
+            await col.updateOne({ _id: toObjectId(insertedId) }, {
+              $set: { email_failed: true, email_failed_at: new Date() }
+            });
           }
-        } else {
-          console.warn('[exhibitors] exhibitor saved but no valid email present; skipping ack mail');
-        }
-
-        // Admin notifications - send for ALL records (add flag to subject if admin-created)
-        const adminEnv = (process.env.EXHIBITOR_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
-        const adminList = adminEnv.split(',').map(s => s.trim()).filter(Boolean);
-        if (adminList.length) {
-          const subject = `New exhibitor registration — ID: ${insertedId}${doc.added_by_admin ? ' (Admin Created)' : ''}`;
-          const html = `<p>New exhibitor registered. </p><pre>${JSON.stringify(saved || body, null, 2)}</pre>`;
-          const text = `New exhibitor\n${JSON.stringify(saved || body, null, 2)}`;
-          await Promise.all(adminList.map(async (addr) => {
-            try {
-              await sendMail({ to: addr, subject, text, html });
-            } catch (e) {
-              console.error('[exhibitors] admin notify error to', addr, e && (e.message || e));
-            }
-          }));
-        } else {
-          console.debug('[exhibitors] no admin emails configured');
         }
       } catch (e) {
-        console.error('[exhibitors] background email error:', e && (e.stack || e));
+        console.error('[exhibitors] background email error:', e);
       }
     })();
 
     return;
   } catch (err) {
-    console.error('[exhibitors] register error (mongo):', err && (err.stack || err));
-    return res.status(500).json({ success: false, error: 'Server error registering exhibitor', detail: err && err.message ? err.message : String(err) });
+    console.error('[exhibitors] register error:', err);
+    return res.status(500).json({ success: false, error: 'Server error registering exhibitor' });
   }
 });
-
 /**
  * POST /api/exhibitors/: id/resend-email
  *

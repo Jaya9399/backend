@@ -91,6 +91,7 @@ support@railtransexpo.com
  * Create new speaker and respond immediately.  If added_by_admin === true, skip background ACK email.
  * NOTE: This sends ONLY the ACK email (no ticket/badge). Ticket emails are sent via /send-ticket endpoint.
  */
+
 router.post('/', async (req, res) => {
   let db;
   let col;
@@ -105,33 +106,29 @@ router.post('/', async (req, res) => {
     if (typeof payload.slots === 'string') {
       try { payload.slots = JSON.parse(payload.slots); } catch { /* keep as string */ }
     }
+    
     const email = (payload.email || '').toString().trim();
     if (!isEmailLike(email)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Valid email required',
-      });
+      return res.status(400).json({ success: false, error: 'Valid email required' });
     }
 
-    // 🔐 OTP verification (skip for admin)
+    // OTP verification (skip for admin)
     if (!payload.added_by_admin) {
       const verificationToken = payload.verificationToken;
-
       if (!checkOtpToken('speaker', email, verificationToken)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Email not verified via OTP',
-        });
+        return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
     }
 
+    // ✅ Extract company from various fields
+    const company = payload.company || payload.organization || payload.employer || payload.affiliation || '';
 
     const doc = {
       name: payload.name || payload.fullName || '',
-      email: (payload.email || '').toString().trim(),
+      email: email,
       mobile: payload.mobile || payload.phone || '',
       designation: payload.designation || '',
-      company: payload.company || '',
+      company: company || '',  // ✅ Root level company
       ticket_category: 'speaker',
       slots: Array.isArray(payload.slots) ? payload.slots : [],
       category: payload.category || '',
@@ -143,7 +140,6 @@ router.post('/', async (req, res) => {
       admin_created_at: payload.added_by_admin ? new Date(payload.admin_created_at || Date.now()) : undefined,
     };
 
-    // ticket_code:  allow incoming, else generate
     doc.ticket_code = (payload.ticket_code || payload.ticketCode) ? String(payload.ticket_code || payload.ticketCode) : generateTicketCode();
 
     col = db.collection('speakers');
@@ -158,8 +154,6 @@ router.post('/', async (req, res) => {
     const savedDoc = await col.findOne({ _id: r.insertedId });
     const output = docToOutput(savedDoc);
 
-
-    // Respond immediately and perform background ACK email (NO ticket, NO badge)
     res.json({
       success: true,
       insertedId,
@@ -168,43 +162,37 @@ router.post('/', async (req, res) => {
       mail: { queued: true },
     });
 
-    // Background:  send simple ACK email (NO ticket, NO badge)
+    // Background email
     (async () => {
       try {
-        if (!isEmailLike(doc.email)) {
-          console.warn('[speakers] saved but no valid email; skipping ack mail');
-          return;
-        }
+        if (!isEmailLike(doc.email)) return;
+        
+        console.log(`[DEBUG] Speaker created with company: "${doc.company}"`);
+        
+        const result = await sendTicketEmail({
+          entity: 'speakers',
+          record: doc,
+          options: { forceSend: false, includeBadge: true }
+        });
 
-        const mail = buildSpeakerAckEmail({ name: doc.name });
-
-        try {
-          await sendMail({
-            to: doc.email,
-            subject: mail.subject,
-            text: mail.text,
-            html: mail.html,
-            from: mail.from,
+        if (result && result.success) {
+          await col.updateOne({ _id: r.insertedId }, {
+            $unset: { email_failed: "", email_failed_at: "" },
+            $set: { email_sent_at: new Date() }
           });
-          console.log('[speakers] ack mail sent to', doc.email);
-          await col.updateOne({ _id: r.insertedId }, { $unset: { email_failed: "", email_failed_at: "" }, $set: { email_sent_at: new Date() } });
-        } catch (e) {
-          console.error('[speakers] ack mail failed:', e && (e.message || e));
-          await col.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
+        } else {
+          await col.updateOne({ _id: r.insertedId }, {
+            $set: { email_failed: true, email_failed_at: new Date() }
+          });
         }
       } catch (e) {
-        console.error('[speakers] ack mail background error:', e && (e.stack || e));
-        try {
-          if (r && r.insertedId) {
-            await col.updateOne({ _id: r.insertedId }, { $set: { email_failed: true, email_failed_at: new Date() } });
-          }
-        } catch (upErr) { /* ignore */ }
+        console.error('[speakers] background email error:', e);
       }
     })();
 
     return;
   } catch (err) {
-    console.error('POST /api/speakers (mongo) error:', err && (err.stack || err));
+    console.error('POST /api/speakers (mongo) error:', err);
     return res.status(500).json({ success: false, error: 'Failed to create speaker' });
   }
 });

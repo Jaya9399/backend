@@ -112,20 +112,12 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Valid email required" });
     }
 
-    // 🔐 OTP verification (SKIP for admin-created records)
+    // OTP verification (SKIP for admin-created records)
     const isAdminCreate = !!body.added_by_admin;
-
-    const verificationToken =
-      body.verificationToken || form.verificationToken;
+    const verificationToken = body.verificationToken || form.verificationToken;
 
     if (!isAdminCreate) {
-      if (
-        !checkOtpToken(
-          "visitor",
-          email,
-          verificationToken
-        )
-      ) {
+      if (!checkOtpToken("visitor", email, verificationToken)) {
         return res.status(403).json({
           success: false,
           error: "Email not verified via OTP",
@@ -133,8 +125,7 @@ router.post("/", async (req, res) => {
       }
     }
 
-
-    // Generate unique ticket_code (collision-safe)
+    // Generate unique ticket_code
     const coll = db.collection("visitors");
     let ticket_code = form.ticket_code;
     if (!ticket_code) {
@@ -143,14 +134,34 @@ router.post("/", async (req, res) => {
       } while (await coll.findOne({ ticket_code }));
     }
 
+    // ✅ Extract company from multiple possible locations
+    let company = "";
+    if (form.company) {
+      company = form.company;
+    } else if (form.organization) {
+      company = form.organization;
+    } else if (form.companyName) {
+      company = form.companyName;
+    } else if (form.employer) {
+      company = form.employer;
+    } else if (form.affiliation) {
+      company = form.affiliation;
+    }
+    
+    // Also check in data field if present
+    if (!company && form.data && form.data.company) {
+      company = form.data.company;
+    }
+
     const doc = {
       role: "visitor",
       name: form.name || null,
       email,
       mobile: form.mobile || null,
+      company: company || null,  // ✅ Root level company
       ticket_code,
 
-      // 🔥 REQUIRED FOR BADGE
+      // Required for badge
       txId: form.txId || null,
       ticket_price: Number(form.ticket_price || 0),
       ticket_gst: Number(form.ticket_gst || 0),
@@ -159,8 +170,6 @@ router.post("/", async (req, res) => {
       data: form,
       createdAt: new Date(),
       updatedAt: new Date(),
-
-      // ✅ Track admin creation but DON'T skip email
       added_by_admin: !!body.added_by_admin,
       admin_created_at: body.added_by_admin ? new Date(body.admin_created_at || Date.now()) : undefined,
     };
@@ -168,28 +177,21 @@ router.post("/", async (req, res) => {
     const r = await coll.insertOne(doc);
     const insertedId = r.insertedId ? String(r.insertedId) : null;
 
-    // ✅ ALWAYS respond immediately and queue email (NO skip logic)
     res.json({
       success: true,
       insertedId,
       ticket_code,
-      mail: { queued: true }, // ✅ Email queued regardless of added_by_admin
+      mail: { queued: true },
     });
 
-    // Background email send (fire-and-forget) - ALWAYS sent
+    // Background email send (fire-and-forget)
     (async () => {
       try {
         const savedDoc = await coll.findOne({ _id: r.insertedId });
-        if (!savedDoc) {
-          console.warn("[visitors] saved but cannot retrieve doc for email");
-          return;
-        }
-
-        if (!isEmailLike(savedDoc.email)) {
-          console.warn("[visitors] saved but no valid email; skipping mail");
-          return;
-        }
-
+        if (!savedDoc || !isEmailLike(savedDoc.email)) return;
+        
+        console.log(`[DEBUG] Visitor created with company: "${savedDoc.company}"`);
+        
         const result = await sendTicketEmail({
           entity: "visitors",
           record: savedDoc,
@@ -197,47 +199,23 @@ router.post("/", async (req, res) => {
         });
 
         if (result && result.success) {
-          try {
-            await coll.updateOne(
-              { _id: r.insertedId },
-              {
-                $set: { email_sent_at: new Date() },
-                $unset: { email_failed: "" }
-              }
-            );
-            console.log("[visitors] email sent to", savedDoc.email);
-          } catch (upErr) {
-            console.warn("[visitors] email sent but failed to update DB flags:", upErr && (upErr.message || upErr));
-          }
+          await coll.updateOne({ _id: r.insertedId }, {
+            $set: { email_sent_at: new Date() },
+            $unset: { email_failed: "" }
+          });
         } else {
-          console.error("[visitors] email failed:", result && result.error ? result.error : result);
-          try {
-            await coll.updateOne(
-              { _id: r.insertedId },
-              {
-                $set: { email_failed: true, email_failed_at: new Date() }
-              }
-            );
-          } catch (upErr) { /* ignore */ }
+          await coll.updateOne({ _id: r.insertedId }, {
+            $set: { email_failed: true, email_failed_at: new Date() }
+          });
         }
       } catch (e) {
-        console.error("[visitors] background email error:", e && (e.stack || e));
-        try {
-          if (r && r.insertedId) {
-            await coll.updateOne(
-              { _id: r.insertedId },
-              {
-                $set: { email_failed: true, email_failed_at: new Date() }
-              }
-            );
-          }
-        } catch (upErr) { /* ignore */ }
+        console.error("[visitors] background email error:", e);
       }
     })();
 
     return;
   } catch (err) {
-    console.error("[visitors] create error:", err && (err.stack || err));
+    console.error("[visitors] create error:", err);
     return res.status(500).json({ success: false, error: "Failed to create visitor" });
   }
 });

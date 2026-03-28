@@ -75,6 +75,31 @@ function docToOutput(doc) {
   return out;
 }
 
+function extractCompany(form) {
+  if (!form) return '';
+  
+  const companyFields = [
+    'company', 'organization', 'companyName', 'company_name',
+    'org', 'employer', 'affiliation', 'business', 'firm'
+  ];
+  
+  for (const field of companyFields) {
+    if (form[field] && typeof form[field] === 'string' && form[field].trim()) {
+      return form[field].trim();
+    }
+  }
+  
+  if (form.data) {
+    for (const field of companyFields) {
+      if (form.data[field] && typeof form.data[field] === 'string' && form.data[field].trim()) {
+        return form.data[field].trim();
+      }
+    }
+  }
+  
+  return '';
+}
+
 function convertBigIntForJson(value) {
   if (typeof value === 'bigint') return value.toString();
   if (Array.isArray(value)) return value.map(convertBigIntForJson);
@@ -158,12 +183,9 @@ router.post('/', express.json(), async (req, res) => {
     const body = req.body || {};
     const form = body.form || body || {};
 
-    // Track if created by admin
     const addedByAdmin = !!body.added_by_admin;
-    // 🔐 OTP verification (skip if admin-created)
     if (!addedByAdmin) {
       const email = (form.email || '').toString().trim();
-
       if (!isEmailLike(email)) {
         return res.status(400).json({
           success: false,
@@ -180,13 +202,17 @@ router.post('/', express.json(), async (req, res) => {
       }
     }
 
-    // Build document
+    // ✅ Extract company
+    const companyName = extractCompany(form);
+
+    // Build document with company at root level
     const doc = {
       name: form.name || null,
       email: form.email || null,
       mobile: form.mobile || null,
       designation: form.designation || null,
-      organization: form.organization || null,
+      organization: form.organization || companyName || null,
+      company: companyName || null,  // ✅ ADD ROOT-LEVEL COMPANY
       awardType: form.awardType || null,
       awardOther: form.awardOther || null,
       bio: form.bio || null,
@@ -209,16 +235,18 @@ router.post('/', express.json(), async (req, res) => {
 
     const saved = await col.findOne({ _id: r.insertedId });
 
-    // ✅ ALWAYS respond immediately and queue email (NO skip logic)
+    // ✅ Debug log
+    console.log(`[DEBUG] Awardee created with company: "${companyName}"`);
+
     res.status(201).json(convertBigIntForJson({
       success: true,
       insertedId,
       ticket_code: doc.ticket_code,
       saved: docToOutput(saved),
-      mail: { queued: true } // ✅ Email queued regardless of added_by_admin
+      mail: { queued: true }
     }));
 
-    // Background ACK email (fire-and-forget)
+    // Background ACK email
     (async () => {
       try {
         if (!doc.email) return;
@@ -254,7 +282,7 @@ router.post('/', express.json(), async (req, res) => {
       }
     })();
 
-    // notify admins (background)
+    // Admin notifications
     (async () => {
       try {
         const adminEnv = (process.env.AWARDEE_ADMIN_EMAILS || process.env.ADMIN_EMAILS || '');
@@ -269,8 +297,6 @@ router.post('/', express.json(), async (req, res) => {
                 .catch(err => console.error('[awardees] admin notify error:', addr, err && (err.message || err)))
             )
           );
-        } else {
-          console.debug('[awardees] no admin emails configured');
         }
       } catch (e) {
         console.error('[awardees] admin notify error (non-fatal):', e && (e.stack || e));
@@ -507,7 +533,13 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
     const existing = await db.collection('awardees').findOne({ _id: oid });
     if (!existing) return res.status(404).json({ success: false, error: 'Awardee not found' });
 
-    const baseWhitelist = new Set(['ticket_code', 'ticket_category', 'txId', 'email', 'name', 'organization', 'mobile', 'designation', 'awardType', 'awardOther', 'bio']);
+    // ✅ Add 'company' to baseWhitelist
+    const baseWhitelist = new Set([
+      'ticket_code', 'ticket_category', 'txId', 'email', 'name',
+      'organization', 'company', 'mobile', 'designation',
+      'awardType', 'awardOther', 'bio'
+    ]);
+    
     const { originalNames, safeNames } = await loadAdminFields(db, 'awardee');
     for (const n of originalNames) baseWhitelist.add(n);
     for (const sn of safeNames) baseWhitelist.add(sn);
@@ -526,6 +558,14 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
           updateData[k] = payload[k];
         }
       }
+    }
+
+    // ✅ Sync company and organization
+    if (updateData.organization && !updateData.company) {
+      updateData.company = updateData.organization;
+    }
+    if (updateData.company && !updateData.organization) {
+      updateData.organization = updateData.company;
     }
 
     if ('ticket_code' in updateData) {
@@ -548,7 +588,6 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
     return res.status(500).json({ success: false, error: 'Failed to update awardee' });
   }
 });
-
 /**
  * PUT /api/awardees/:id
  */
@@ -568,7 +607,13 @@ router.put('/:id', express.json(), async (req, res) => {
     delete data._id;
     delete data.title;
 
-    const allowedBase = new Set(['name', 'email', 'mobile', 'designation', 'organization', 'awardType', 'awardOther', 'bio', 'ticket_category', 'ticket_code', 'txId', 'registered_at', 'created_at', 'status', 'proof_path']);
+    // ✅ Add 'company' to allowedBase
+    const allowedBase = new Set([
+      'name', 'email', 'mobile', 'designation', 'organization', 'company',
+      'awardType', 'awardOther', 'bio', 'ticket_category', 'ticket_code',
+      'txId', 'registered_at', 'created_at', 'status', 'proof_path'
+    ]);
+    
     const { originalNames, safeNames } = await loadAdminFields(db, 'awardee');
     for (const n of originalNames) allowedBase.add(n);
     for (const s of safeNames) allowedBase.add(s);
@@ -601,6 +646,14 @@ router.put('/:id', express.json(), async (req, res) => {
       } else {
         updateData[k] = v;
       }
+    }
+
+    // ✅ Sync company and organization
+    if (updateData.organization && !updateData.company) {
+      updateData.company = updateData.organization;
+    }
+    if (updateData.company && !updateData.organization) {
+      updateData.organization = updateData.company;
     }
 
     if (Object.keys(updateData).length === 0) return res.status(400).json({ success: false, error: 'No valid fields to update.' });
