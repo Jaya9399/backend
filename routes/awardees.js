@@ -533,7 +533,7 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
     const existing = await db.collection('awardees').findOne({ _id: oid });
     if (!existing) return res.status(404).json({ success: false, error: 'Awardee not found' });
 
-    // ✅ Add 'company' to baseWhitelist
+  
     const baseWhitelist = new Set([
       'ticket_code', 'ticket_category', 'txId', 'email', 'name',
       'organization', 'company', 'mobile', 'designation',
@@ -560,7 +560,7 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
       }
     }
 
-    // ✅ Sync company and organization
+
     if (updateData.organization && !updateData.company) {
       updateData.company = updateData.organization;
     }
@@ -607,7 +607,7 @@ router.put('/:id', express.json(), async (req, res) => {
     delete data._id;
     delete data.title;
 
-    // ✅ Add 'company' to allowedBase
+  
     const allowedBase = new Set([
       'name', 'email', 'mobile', 'designation', 'organization', 'company',
       'awardType', 'awardOther', 'bio', 'ticket_category', 'ticket_code',
@@ -648,7 +648,7 @@ router.put('/:id', express.json(), async (req, res) => {
       }
     }
 
-    // ✅ Sync company and organization
+  
     if (updateData.organization && !updateData.company) {
       updateData.company = updateData.organization;
     }
