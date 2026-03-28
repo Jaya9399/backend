@@ -149,33 +149,62 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
     width: C.QR.size * 3,
   });
   const qrBuf = Buffer.from(qrDataUrl.split(",")[1], "base64");
-  doc.image(qrBuf,
-    qc.x + (qc.width - C.QR.size) / 2,
-    qc.y + 16,
-    { width: C.QR.size });
-
+  
+  const qrX = qc.x + (qc.width - C.QR.size) / 2;
   const qrY = qc.y + 16;
+  doc.image(qrBuf, qrX, qrY, { width: C.QR.size });
+
   const textStartY = qrY + C.QR.size + 12;
 
-  // NAME
+  // Draw NAME with height calculation
   doc.fillColor("#000")
     .font("Helvetica-Bold")
-    .fontSize(12)
-    .text(name, qc.x + 10, textStartY, {
+    .fontSize(12);
+  
+  // Calculate name height for proper company positioning
+  const nameHeight = doc.heightOfString(name, {
+    width: qc.width - 20,
+    align: "center"
+  });
+  
+  doc.text(name, qc.x + 10, textStartY, {
+    width: qc.width - 20,
+    align: "center"
+  });
+
+  // Draw COMPANY only if not empty, with dynamic positioning
+  if (company && company.trim() !== "") {
+    doc.fillColor("#555")
+      .font("Helvetica")
+      .fontSize(9);
+    
+    // Position company below name with 5px spacing
+    const companyY = textStartY + nameHeight + 5;
+    
+    // Check if company text will fit within QR card
+    const companyHeight = doc.heightOfString(company, {
       width: qc.width - 20,
       align: "center"
     });
-
-  // COMPANY (auto wrap)
-  doc.fillColor("#555")
-    .font("Helvetica")
-    .fontSize(9)
-    .text(company, qc.x + 10, textStartY + 16, {
-      width: qc.width - 20,
-      align: "center",
-    });
+    
+    if (companyY + companyHeight <= qc.y + qc.height - 10) {
+      doc.text(company, qc.x + 10, companyY, {
+        width: qc.width - 20,
+        align: "center",
+        lineBreak: true
+      });
+    } else {
+      console.warn(`[WARNING] Company text may be truncated: "${company}"`);
+      // Try with smaller font if needed
+      doc.fontSize(8);
+      doc.text(company, qc.x + 10, companyY, {
+        width: qc.width - 20,
+        align: "center",
+        lineBreak: true
+      });
+    }
+  }
 }
-
 
 
 function drawFooter(doc) {
