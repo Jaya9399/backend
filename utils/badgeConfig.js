@@ -20,7 +20,6 @@ const HEADER = {
   bgColor: "#F5EFD6",
 };
 
-// RailTrans logo — left side, fills roughly left 40% of header
 const RAILTRANS_LOGO = {
   path:  path.join(ASSETS_LOGO, "railtranslogo.png"),
   x:     8,
@@ -28,15 +27,13 @@ const RAILTRANS_LOGO = {
   width: 148,
 };
 
-// Bharat Mandapam logo — top-right, pulled in so it doesn't clip
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x:     PAGE.width - 62,   // 338
+  x:     PAGE.width - 62,
   y:     14,
   width: 54,
 };
 
-// Edition Pill — left of Mandapam
 const EDITION_PILL = {
   text:      "6th EDITION",
   x:         195,
@@ -46,7 +43,6 @@ const EDITION_PILL = {
   fontSize:  8,
 };
 
-// Date Pills + text positions
 const DATE_PILLS = {
   pill1: { text: "03", x: 195, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
   pill2: { text: "04", x: 234, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
@@ -73,70 +69,76 @@ const BODY = {
   endY:           490,
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
-  overlayOpacity: 185,   // 0–255; higher = more white = less visible bg image
+  overlayOpacity: 218,   // very high — bg image barely visible, just a hint
 };
 
-// ─── QR Card ─────────────────────────────────────────────────────────────────
+// ─── QR Card — wider to fill white space ─────────────────────────────────────
 const QR_CARD = {
-  width:       210,
-  height:      215,
+  width:       260,   // much wider
+  height:      260,   // taller too
   get x()     { return (PAGE.width - this.width) / 2; },
-  y:           138,
-  radius:      10,
+  y:           132,
+  radius:      12,
   bgColor:     "#FFFFFF",
-  borderColor: "#CCCCCC",
+  borderColor: "#DDDDDD",
   borderWidth: 0.8,
 };
 
-const QR = { size: 140 };
+const QR = { size: 190 };  // QR fills the card properly
 
 // ─── Text Areas ──────────────────────────────────────────────────────────────
+// QR card bottom: 132 + 260 = 392
 const TEXT_AREA = {
-  nameY:           362,
-  companyY:        380,
+  nameY:           400,
+  companyY:        417,
   nameFontSize:    13,
   companyFontSize: 9,
 };
 
-// ─── Footer Logos with Pills ──────────────────────────────────────────────────
+// ─── Footer ───────────────────────────────────────────────────────────────────
+// Footer sits between ~434 and ribbon at 490
+// Left half: ORGANISED BY pill + Urban Infra logo
+// Right half: IN ASSOCIATION WITH pill + two logos side by side
+
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
   labelX:         10,
-  labelY:         400,
+  labelY:         436,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
   logoX:          10,
-  logoY:          418,
-  logoWidth:      85,
+  logoY:          454,
+  logoWidth:      100,  // wide so Urban Infra text is legible
 };
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
-  labelX:         200,
-  labelY:         400,
+  labelX:         210,
+  labelY:         436,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
+  // Two logos side-by-side, both same height, equal spacing
   logo1Path:      path.join(ASSETS_LOGO, "rail_chamber.png"),
-  logo1X:         205,
-  logo1Y:         418,
-  logo1Width:     48,
+  logo1X:         215,
+  logo1Y:         454,
+  logo1Width:     56,
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
-  logo2X:         260,
-  logo2Y:         416,
-  logo2Width:     48,
+  logo2X:         278,
+  logo2Y:         454,
+  logo2Width:     56,
 };
 
 // ─── Ribbon ───────────────────────────────────────────────────────────────────
 const RIBBON = {
   y:            490,
-  height:       110,      // 490 + 110 = 600 (fills to bottom exactly)
-  textSize:     34,
+  height:       110,   // 490 + 110 = 600
+  textSize:     38,
   textColor:    "#FFFFFF",
   font:         "Helvetica-Bold",
-  borderRadius: 14,       // subtle — not a big pill shape
+  borderRadius: 14,
 };
 
 module.exports = {
