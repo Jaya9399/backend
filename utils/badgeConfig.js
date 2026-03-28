@@ -8,7 +8,7 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
-const PAGE = { width: 400, height: 590 };
+const PAGE = { width: 400, height: 550 }; // Reduced from 590 to eliminate white space
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
@@ -70,7 +70,7 @@ const TAGLINE = {
 // ─── Body ────────────────────────────────────────────────────────────────────
 const BODY = {
   startY:         124,
-  endY:           490,
+  endY:           462, // Adjusted based on new page height
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
   overlayOpacity: 185,
@@ -79,7 +79,7 @@ const BODY = {
 // ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
   width:       210,
-  height:      210,
+  height:      220, // Increased to accommodate name + company
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -102,39 +102,39 @@ const TEXT_AREA = {
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
   labelX:         20,
-  labelY:         400,
+  labelY:         380, // Moved up
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
   logoX:          20,
-  logoY:          418,
+  logoY:          398, // Moved up
   logoWidth:      85,
 };
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
   labelX:         235,
-  labelY:         400,
+  labelY:         380, // Moved up
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  7,
   logo1Path:      path.join(ASSETS_LOGO, "railchamber_logo.png"),
   logo1X:         205,
-  logo1Y:         418,
+  logo1Y:         398, // Moved up
   logo1Width:     40,
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
   logo2X:         260,
-  logo2Y:         416,
+  logo2Y:         396, // Moved up
   logo2Width:     40,
 };
 
 const RIBBON = {
-  y: 490,
-  height: 80,
-  textSize: 30,
+  y: 470, // Moved up to eliminate white space
+  height: 70, // Reduced height
+  textSize: 28, // Slightly smaller text
   borderRadius: 20,
-  textColor: "#FFFFFF",  // Added textColor property
+  textColor: "#FFFFFF",
 };
 
 module.exports = {

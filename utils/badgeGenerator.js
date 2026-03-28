@@ -133,12 +133,15 @@ function drawBodyBackground(doc) {
 
 async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   const qc = C.QR_CARD;
+  
+  // Draw card background
   roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
   doc.fill(qc.bgColor);
   doc.strokeColor(qc.borderColor).lineWidth(qc.borderWidth);
   roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
   doc.stroke();
 
+  // Generate QR code
   const qrPayload = mode === "scan"
     ? ticketCode
     : JSON.stringify({ ticket_code: ticketCode, entity });
@@ -151,17 +154,23 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   const qrBuf = Buffer.from(qrDataUrl.split(",")[1], "base64");
   
   const qrX = qc.x + (qc.width - C.QR.size) / 2;
-  const qrY = qc.y + 16;
+  const qrY = qc.y + 12; // Moved up slightly
   doc.image(qrBuf, qrX, qrY, { width: C.QR.size });
 
-  const textStartY = qrY + C.QR.size + 12;
+  // Calculate text starting position
+  const textStartY = qrY + C.QR.size + 8;
+  
+  console.log(`[DEBUG] Drawing name: "${name}"`);
+  console.log(`[DEBUG] Drawing company: "${company}"`);
+  console.log(`[DEBUG] QR Card bounds: y=${qc.y}, height=${qc.height}`);
+  console.log(`[DEBUG] Text start Y: ${textStartY}`);
 
-  // Draw NAME with height calculation
+  // Draw NAME
   doc.fillColor("#000")
     .font("Helvetica-Bold")
     .fontSize(12);
   
-  // Calculate name height for proper company positioning
+  // Calculate name height
   const nameHeight = doc.heightOfString(name, {
     width: qc.width - 20,
     align: "center"
@@ -171,38 +180,50 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
     width: qc.width - 20,
     align: "center"
   });
+  
+  console.log(`[DEBUG] Name height: ${nameHeight}`);
 
-  // Draw COMPANY only if not empty, with dynamic positioning
-  if (company && company.trim() !== "") {
+  // Draw COMPANY if not empty
+  if (company && company.trim() !== "" && company !== "UNDEFINED" && company !== "NULL") {
     doc.fillColor("#555")
       .font("Helvetica")
       .fontSize(9);
     
-    // Position company below name with 5px spacing
-    const companyY = textStartY + nameHeight + 5;
+    // Position company below name with spacing
+    const companyY = textStartY + nameHeight + 6;
     
-    // Check if company text will fit within QR card
+    console.log(`[DEBUG] Company Y position: ${companyY}`);
+    
+    // Calculate company height
     const companyHeight = doc.heightOfString(company, {
       width: qc.width - 20,
       align: "center"
     });
     
-    if (companyY + companyHeight <= qc.y + qc.height - 10) {
+    console.log(`[DEBUG] Company height: ${companyHeight}`);
+    console.log(`[DEBUG] Total height used: ${companyY + companyHeight - qc.y}`);
+    
+    // Check if it fits
+    if (companyY + companyHeight <= qc.y + qc.height - 8) {
       doc.text(company, qc.x + 10, companyY, {
         width: qc.width - 20,
         align: "center",
         lineBreak: true
       });
+      console.log(`[DEBUG] Company drawn successfully`);
     } else {
       console.warn(`[WARNING] Company text may be truncated: "${company}"`);
-      // Try with smaller font if needed
+      // Try with smaller font
       doc.fontSize(8);
       doc.text(company, qc.x + 10, companyY, {
         width: qc.width - 20,
         align: "center",
         lineBreak: true
       });
+      console.log(`[DEBUG] Company drawn with smaller font`);
     }
+  } else {
+    console.log(`[DEBUG] No company to draw (value: "${company}")`);
   }
 }
 
@@ -309,22 +330,42 @@ async function generateBadgePDF(entity, data, options = {}) {
       drawHeader(doc);
       drawTagline(doc);
       drawBodyBackground(doc);
-      const name = (data.name || data.full_name ||
-        (data.firstName ? `${data.firstName} ${data.lastName || ""}` : "")).trim().toUpperCase();
-      const company = (data.company ||
-        data.organization ||
-        data.companyName ||
-        data.employer ||
-        data.affiliation ||
-        data.business ||
-        "").trim().toUpperCase(); // Add .toUpperCase() for consistency
-
-      console.log(`[DEBUG] Company extracted: "${company}"`); // Add debug log
+      
+      // Enhanced name extraction
+      const name = (data.name || 
+                   data.full_name ||
+                   (data.firstName ? `${data.firstName} ${data.lastName || ""}` : "") ||
+                   data.fullName ||
+                   "").trim().toUpperCase();
+      
+      // Enhanced company extraction with more fallbacks and null checks
+      let company = (data.company ||
+                    data.organization ||
+                    data.companyName ||
+                    data.company_name ||
+                    data.org ||
+                    data.employer ||
+                    data.affiliation ||
+                    data.business ||
+                    data.firm ||
+                    (data.data && data.data.company) ||
+                    (data.data && data.data.organization) ||
+                    (data.data && data.data.companyName) ||
+                    (data.data && data.data.employer) ||
+                    "").trim().toUpperCase();
+      
+      // Remove any "null" or "undefined" strings
+      if (company === "NULL" || company === "UNDEFINED" || company === "") {
+        company = "";
+      }
+      
+      console.log(`[DEBUG] Final Company extracted: "${company}"`);
+      console.log(`[DEBUG] Data keys:`, Object.keys(data));
+      if (data.data) {
+        console.log(`[DEBUG] Data.data keys:`, Object.keys(data.data));
+      }
+      
       await drawQRCard(doc, ticketCode, entity, mode, name, company);
-
-
-
-
       drawFooter(doc);
       drawRibbon(doc, themeColor, ribbonLabel);
 
