@@ -68,28 +68,29 @@ function drawHeader(doc) {
 
   doc.rect(0, H.y, C.PAGE.width, H.height).fill(H.bgColor);
 
-  // RailTrans logo — left
+  // RailTrans logo — left column
   safeImage(doc, C.RAILTRANS_LOGO.path, C.RAILTRANS_LOGO.x, C.RAILTRANS_LOGO.y, C.RAILTRANS_LOGO.width);
 
   // "6th EDITION" pill
   drawPill(doc, ep.text, ep.x, ep.y, ep.bgColor, ep.textColor, ep.fontSize, 16, 18);
 
-  // Date squares
+  // Date squares "03" "04"
   drawSquarePill(doc, dp.pill1.text, dp.pill1.x, dp.pill1.y, dp.pill1.width, dp.pill1.height,
     dp.pill1.bgColor, dp.pill1.textColor, dp.pill1.fontSize);
   drawSquarePill(doc, dp.pill2.text, dp.pill2.x, dp.pill2.y, dp.pill2.width, dp.pill2.height,
     dp.pill2.bgColor, dp.pill2.textColor, dp.pill2.fontSize);
 
-  // "JULY 2026" — clamped width so it never clips right edge
-  const monthMaxWidth = C.PAGE.width - dp.monthX - 68; // leave room for Mandapam logo
-  doc.fillColor("#000000").font("Helvetica-Bold").fontSize(20)
+  // "JULY 2026" — must fit between monthX and Mandapam logo (x:344)
+  // Available width = 344 - 272 - 4 = 68px. At fontSize 17 "JULY 2026" ≈ 67px. Perfect single line.
+  const monthW = C.MANDAPAM.x - dp.monthX - 4;
+  doc.fillColor("#000000").font("Helvetica-Bold").fontSize(17)
      .text("JULY 2026", dp.monthX, dp.monthY,
-       { width: monthMaxWidth, lineBreak: false });
+       { width: monthW, lineBreak: false });
 
-  // Venue text — wraps if needed
-  doc.fillColor("#555555").font("Helvetica").fontSize(6.5)
-     .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp.monthX, dp.venueY,
-       { width: monthMaxWidth, lineBreak: true });
+  // Venue — smaller, below JULY 2026, same available width, allow wrap
+  doc.fillColor("#555555").font("Helvetica").fontSize(6)
+     .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp.venueX, dp.venueY,
+       { width: monthW, lineBreak: true });
 
   // Bharat Mandapam logo — top-right
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
@@ -115,11 +116,8 @@ function drawTagline(doc) {
 
 function drawBodyBackground(doc) {
   const bodyH = C.BODY.endY - C.BODY.startY;
-  // Base colour fill
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill(C.BODY.bgColor);
-  // Background image
   safeImage(doc, C.BODY.bgImage, 0, C.BODY.startY, C.PAGE.width, { height: bodyH });
-  // Heavy white overlay so image is barely visible
   doc.save();
   doc.opacity(C.BODY.overlayOpacity / 255);
   doc.rect(0, C.BODY.startY, C.PAGE.width, bodyH).fill("#FFFFFF");
@@ -162,36 +160,40 @@ function drawNameAndCompany(doc, name, company) {
 }
 
 function drawFooter(doc) {
-  const org = C.ORGANISED_BY;
+  const org   = C.ORGANISED_BY;
   const assoc = C.ASSOCIATION;
 
-  // ── Left: ORGANISED BY ────────────────────────────────────────────────────
+  // Left: ORGANISED BY pill + logo
   drawPill(doc, org.label, org.labelX, org.labelY,
     org.labelBgColor, org.labelTextColor, org.labelFontSize, 16, 15);
   safeImage(doc, org.logoPath, org.logoX, org.logoY, org.logoWidth);
 
-  // ── Right: IN ASSOCIATION WITH ────────────────────────────────────────────
+  // Right: IN ASSOCIATION WITH pill + two logos side by side
   drawPill(doc, assoc.label, assoc.labelX, assoc.labelY,
     assoc.labelBgColor, assoc.labelTextColor, assoc.labelFontSize, 16, 15);
-
-  // Both logos drawn at same Y, side by side
   safeImage(doc, assoc.logo1Path, assoc.logo1X, assoc.logo1Y, assoc.logo1Width);
   safeImage(doc, assoc.logo2Path, assoc.logo2X, assoc.logo2Y, assoc.logo2Width);
 }
 
 function drawRibbon(doc, themeColor, ribbonLabel) {
   const R = C.RIBBON;
+
+  // Draw ribbon shape
   roundedRect(doc, 0, R.y, C.PAGE.width, R.height, R.borderRadius);
   doc.fill(themeColor);
 
-  const textY = R.y + (R.height / 2) - (R.textSize / 2) - 2;
+  // Measure text height so we can centre it precisely
+  doc.font(R.font).fontSize(R.textSize);
+  const textH = R.textSize;                        // approximate line height
+  const textY = R.y + (R.height - textH) / 2 - 2; // vertically centred
 
   // Subtle shadow
-  doc.fillColor("#000000").opacity(0.15).font(R.font).fontSize(R.textSize)
-     .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width });
-  // Label
-  doc.fillColor(R.textColor).opacity(1).font(R.font).fontSize(R.textSize)
-     .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width });
+  doc.fillColor("#00000033").font(R.font).fontSize(R.textSize)
+     .text(ribbonLabel, 1, textY + 1, { align: "center", width: C.PAGE.width, lineBreak: false });
+
+  // Main label
+  doc.fillColor(R.textColor).font(R.font).fontSize(R.textSize)
+     .text(ribbonLabel, 0, textY, { align: "center", width: C.PAGE.width, lineBreak: false });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
