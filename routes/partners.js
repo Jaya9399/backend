@@ -145,7 +145,7 @@ router.post('/', async (req, res) => {
     const name = String(pick(['name', 'fullName', 'full_name', 'firstName', 'first_name']) || '').trim();
     const mobile = String(pick(['mobile', 'phone', 'contact', 'whatsapp']) || '').trim();
     const email = String(pick(['email', 'mail', 'emailId', 'email_id', 'contactEmail']) || '').trim();
-    
+
     // OTP verification (skip for admin-created partners)
     if (!body.added_by_admin) {
       if (!isEmailLike(email)) {
@@ -158,7 +158,7 @@ router.post('/', async (req, res) => {
     }
 
     const designation = String(pick(['designation', 'role', 'title']) || '').trim();
-    
+
     // ✅ Extract company from various fields
     const company = String(pick(['companyName', 'company', 'organization', 'org']) || '').trim();
     const businessType = String(pick(['businessType', 'business_type', 'companyType']) || '').trim();
@@ -200,7 +200,7 @@ router.post('/', async (req, res) => {
       } while (await col.findOne({ ticket_code }));
     }
     doc.ticket_code = ticket_code;
-    
+
     const r = await col.insertOne(doc);
     const insertedId = r && r.insertedId ? String(r.insertedId) : null;
 
@@ -222,12 +222,15 @@ router.post('/', async (req, res) => {
 
         const to = saved.email || null;
         if (to && isEmailLike(to)) {
-          const result = await sendTicketEmail({
-            entity: 'partners',
-            record: saved,
-            options: { forceSend: false, includeBadge: true }
+          const mail = buildPartnerAckEmail({ name: saved.name, company: saved.company });
+          await mailer.sendMail({
+            to: saved.email,
+            subject: mail.subject,
+            text: mail.text,
+            html: mail.html,
+            from: mail.from,
           });
-          
+
           if (result && result.success) {
             await col.updateOne({ _id: r.insertedId }, {
               $unset: { email_failed: "", email_failed_at: "" },

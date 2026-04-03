@@ -64,14 +64,7 @@ function determineRoleLabel(visitor = {}, explicitTicketCategory = "") {
   return "VISITOR";
 }
 
-/**
- * buildTicketEmail(...)
- * 
- * ✅ NO PDF ATTACHMENT - user must click download button
- * ✅ Event details from form. eventDetails (passed by caller)
- * ✅ FIXED: Download URL uses query params
- * ✅ UPGRADE SUPPORT: Shows upgrade banner when form.isUpgrade=true
- */
+
 
 async function buildTicketEmail({
   frontendBase = "",

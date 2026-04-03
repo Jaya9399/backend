@@ -117,7 +117,7 @@ router.post('/', async (req, res) => {
     const col = db.collection('exhibitors');
 
     const body = req.body || {};
-    
+
     // OTP verification (skip if admin-created)
     if (!body.added_by_admin) {
       const email = (body.email || '').toString().trim();
@@ -142,7 +142,7 @@ router.post('/', async (req, res) => {
 
     const companyVal = pickValue(body, ['companyName', 'company', 'company_name', 'companyname', 'organization', 'org']);
     const otherVal = pickValue(body, ['other', 'other_company', 'otherCompany']);
-    
+
     if (!companyVal && !otherVal) {
       return res.status(400).json({ success: false, error: 'companyName is required' });
     }
@@ -182,7 +182,7 @@ router.post('/', async (req, res) => {
     doc.status = 'pending';
     doc.created_at = new Date();
     doc.updated_at = new Date();
-    
+
     let ticket_code = body.ticket_code;
     if (!ticket_code) {
       do {
@@ -190,7 +190,7 @@ router.post('/', async (req, res) => {
       } while (await col.findOne({ ticket_code }));
     }
     doc.ticket_code = ticket_code;
-    
+
     const insertRes = await col.insertOne(doc);
     const insertedId = insertRes && insertRes.insertedId ? String(insertRes.insertedId) : null;
 
@@ -212,12 +212,15 @@ router.post('/', async (req, res) => {
 
         const to = saved.email || body.email || null;
         if (to && isEmailLike(to)) {
-          const result = await sendTicketEmail({
-            entity: 'exhibitors',
-            record: saved,
-            options: { forceSend: false, includeBadge: true }
+          const mail = buildExhibitorAckEmail({ name: saved.name });
+          await mailer.sendMail({
+            to: saved.email,
+            subject: mail.subject,
+            text: mail.text,
+            html: mail.html,
+            from: mail.from,
           });
-          
+
           if (result && result.success) {
             await col.updateOne({ _id: toObjectId(insertedId) }, {
               $unset: { email_failed: "", email_failed_at: "" },
