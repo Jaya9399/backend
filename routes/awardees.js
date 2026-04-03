@@ -187,24 +187,25 @@ router.post('/', express.json(), async (req, res) => {
     const form = body.form || body || {};
 
     const addedByAdmin = !!body.added_by_admin;
-    // OTP verification
     if (!addedByAdmin) {
       const email = (form.email || '').toString().trim();
+      const verificationToken = body.verificationToken; // ✅ Define FIRST!
+      
       console.log('[awardees] ========== OTP CHECK ==========');
       console.log('[awardees] Email:', email);
       console.log('[awardees] Role being checked:', 'awardee');
-      console.log('[awardees] Token received from frontend:', verificationToken);
+      console.log('[awardees] Token received from frontend:', verificationToken); // ✅ Now defined!
       console.log('[awardees] Looking for key:', `verified::awardee::${email.toLowerCase()}`);
       console.log('[awardees] Current otpVerifiedStore size:', global._otpVerifiedStore?.size);
       console.log('[awardees] All store keys:', global._otpVerifiedStore ? Array.from(global._otpVerifiedStore.keys()) : 'no store');
-
+    
       if (!isEmailLike(email)) {
         return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
       }
-
+    
       const isValid = checkOtpToken('awardee', email, verificationToken);
       console.log('[awardees] OTP check result:', isValid);
-
+    
       if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
