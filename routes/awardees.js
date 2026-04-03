@@ -80,18 +80,18 @@ function docToOutput(doc) {
 
 function extractCompany(form) {
   if (!form) return '';
-  
+
   const companyFields = [
     'company', 'organization', 'companyName', 'company_name',
     'org', 'employer', 'affiliation', 'business', 'firm'
   ];
-  
+
   for (const field of companyFields) {
     if (form[field] && typeof form[field] === 'string' && form[field].trim()) {
       return form[field].trim();
     }
   }
-  
+
   if (form.data) {
     for (const field of companyFields) {
       if (form.data[field] && typeof form.data[field] === 'string' && form.data[field].trim()) {
@@ -99,7 +99,7 @@ function extractCompany(form) {
       }
     }
   }
-  
+
   return '';
 }
 
@@ -187,22 +187,28 @@ router.post('/', express.json(), async (req, res) => {
     const form = body.form || body || {};
 
     const addedByAdmin = !!body.added_by_admin;
+    // OTP verification
     if (!addedByAdmin) {
       const email = (form.email || '').toString().trim();
+      console.log('[awardees] ========== OTP CHECK ==========');
+      console.log('[awardees] Email:', email);
+      console.log('[awardees] Role being checked:', 'awardee');
+      console.log('[awardees] Token received from frontend:', verificationToken);
+      console.log('[awardees] Looking for key:', `verified::awardee::${email.toLowerCase()}`);
+      console.log('[awardees] Current otpVerifiedStore size:', global._otpVerifiedStore?.size);
+      console.log('[awardees] All store keys:', global._otpVerifiedStore ? Array.from(global._otpVerifiedStore.keys()) : 'no store');
+
       if (!isEmailLike(email)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Valid email required for OTP verification',
-        });
+        return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
       }
 
-      const verificationToken = body.verificationToken;
-      if (!checkOtpToken('awardee', email, verificationToken)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Email not verified via OTP',
-        });
+      const isValid = checkOtpToken('awardee', email, verificationToken);
+      console.log('[awardees] OTP check result:', isValid);
+
+      if (!isValid) {
+        return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
+      console.log('[awardees] OTP verification PASSED!');
     }
 
     // ✅ Extract company
@@ -536,13 +542,13 @@ router.post('/:id/confirm', express.json(), async (req, res) => {
     const existing = await db.collection('awardees').findOne({ _id: oid });
     if (!existing) return res.status(404).json({ success: false, error: 'Awardee not found' });
 
-  
+
     const baseWhitelist = new Set([
       'ticket_code', 'ticket_category', 'txId', 'email', 'name',
       'organization', 'company', 'mobile', 'designation',
       'awardType', 'awardOther', 'bio'
     ]);
-    
+
     const { originalNames, safeNames } = await loadAdminFields(db, 'awardee');
     for (const n of originalNames) baseWhitelist.add(n);
     for (const sn of safeNames) baseWhitelist.add(sn);
@@ -610,13 +616,13 @@ router.put('/:id', express.json(), async (req, res) => {
     delete data._id;
     delete data.title;
 
-  
+
     const allowedBase = new Set([
       'name', 'email', 'mobile', 'designation', 'organization', 'company',
       'awardType', 'awardOther', 'bio', 'ticket_category', 'ticket_code',
       'txId', 'registered_at', 'created_at', 'status', 'proof_path'
     ]);
-    
+
     const { originalNames, safeNames } = await loadAdminFields(db, 'awardee');
     for (const n of originalNames) allowedBase.add(n);
     for (const s of safeNames) allowedBase.add(s);
@@ -651,7 +657,7 @@ router.put('/:id', express.json(), async (req, res) => {
       }
     }
 
-  
+
     if (updateData.organization && !updateData.company) {
       updateData.company = updateData.organization;
     }
