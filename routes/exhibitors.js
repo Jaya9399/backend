@@ -101,25 +101,25 @@ router.post('/', async (req, res) => {
 
     const body = req.body || {};
 
+    // OTP verification (skip if admin-created)
     if (!body.added_by_admin) {
       const email = (body.email || '').toString().trim();
       const verificationToken = body.verificationToken;
 
-      console.log('[exhibitors] ========== OTP CHECK ==========');
-      console.log('[exhibitors] Email:', email);
-      console.log('[exhibitors] Token:', verificationToken);
+      console.log('[exhibitors] OTP verification - email:', email);
+      console.log('[exhibitors] OTP verification - token:', verificationToken);
 
       if (!isEmailLike(email)) {
-        return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
+        return res.status(400).json({ success: false, error: 'Valid email required' });
       }
 
+      // ✅ EXACT same pattern as visitors.js
       const isValid = await verifyOtpToken(db, 'exhibitor', email, verificationToken);
-      console.log('[exhibitors] OTP check result:', isValid);
 
       if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
-      console.log('[exhibitors] OTP verification PASSED!');
+      console.log('[exhibitors] OTP verification PASSED');
     }
 
     function pickValue(obj, keys) {
