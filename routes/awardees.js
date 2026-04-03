@@ -30,6 +30,9 @@ function checkOtpToken(role, email, token) {
   return true;
 }
 
+function isEmailLike(v) {
+  return typeof v === 'string' && /\S+@\S+\.\S+/.test(v);
+}
 let safeFieldName;
 try {
   safeFieldName = require('../utils/mongoSchemaSync').safeFieldName;

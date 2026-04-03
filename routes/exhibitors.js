@@ -130,10 +130,19 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Extract company from various fields
-    const companyVal = pick(['companyName', 'company', 'company_name', 'companyname', 'organization', 'org']);
-    const otherVal = pick(['other', 'other_company', 'otherCompany']);
+    function pickValue(obj, keys) {
+      for (const key of keys) {
+        const value = obj[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+          return String(value).trim();
+        }
+      }
+      return '';
+    }
 
+    const companyVal = pickValue(body, ['companyName', 'company', 'company_name', 'companyname', 'organization', 'org']);
+    const otherVal = pickValue(body, ['other', 'other_company', 'otherCompany']);
+    
     if (!companyVal && !otherVal) {
       return res.status(400).json({ success: false, error: 'companyName is required' });
     }
