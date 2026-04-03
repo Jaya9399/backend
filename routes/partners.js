@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mailer = require('../utils/mailer');
 const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient');
 const { sendMail } = require('../utils/mailer');
@@ -9,29 +10,6 @@ const { verifyOtpToken } = require('../utils/otpStore');
 router.use(express.json({ limit: '5mb' }));
 function generateTicketCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-/**
- * Helpers / Templates
- */
-// OTP verification helper (shared global store from otp.js)
-function checkOtpToken(role, email, token) {
-  if (!role || !email || !token) return false;
-
-  const store = global._otpVerifiedStore;
-  if (!store) return false;
-
-  const key = `verified::${role}::${email.toLowerCase()}`;
-  const info = store.get(key);
-
-  if (!info || info.token !== token) return false;
-  if (info.expires < Date.now()) {
-    store.delete(key);
-    return false;
-  }
-
-  store.delete(key); // single-use
-  return true;
 }
 
 
@@ -211,41 +189,42 @@ router.post('/', async (req, res) => {
       mail: { queued: true }
     });
 
-    // Background email
-    (async () => {
+  // Background email
+(async () => {
+  try {
+    if (!insertedId) return;
+    const saved = await col.findOne({ _id: r.insertedId });
+    if (!saved) return;
+
+    console.log(`[DEBUG] Partner created with company: "${saved.company}"`);
+
+    const to = saved.email || null;
+    if (to && isEmailLike(to)) {
+      const mail = buildPartnerAckEmail({ name: saved.name, company: saved.company });
       try {
-        if (!insertedId) return;
-        const saved = await col.findOne({ _id: r.insertedId });
-        if (!saved) return;
-
-        console.log(`[DEBUG] Partner created with company: "${saved.company}"`);
-
-        const to = saved.email || null;
-        if (to && isEmailLike(to)) {
-          const mail = buildPartnerAckEmail({ name: saved.name, company: saved.company });
-          await mailer.sendMail({
-            to: saved.email,
-            subject: mail.subject,
-            text: mail.text,
-            html: mail.html,
-            from: mail.from,
-          });
-
-          if (result && result.success) {
-            await col.updateOne({ _id: r.insertedId }, {
-              $unset: { email_failed: "", email_failed_at: "" },
-              $set: { email_sent_at: new Date() }
-            });
-          } else {
-            await col.updateOne({ _id: r.insertedId }, {
-              $set: { email_failed: true, email_failed_at: new Date() }
-            });
-          }
-        }
+        await mailer.sendMail({
+          to: saved.email,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          from: mail.from,
+        });
+        console.log('[partners] ack mail sent to', saved.email);
+        await col.updateOne({ _id: r.insertedId }, {
+          $unset: { email_failed: "", email_failed_at: "" },
+          $set: { email_sent_at: new Date() }
+        });
       } catch (e) {
-        console.error('[partners] background email error:', e);
+        console.error('[partners] ack mail failed:', e && (e.message || e));
+        await col.updateOne({ _id: r.insertedId }, {
+          $set: { email_failed: true, email_failed_at: new Date() }
+        });
       }
-    })();
+    }
+  } catch (e) {
+    console.error('[partners] background email error:', e);
+  }
+})();
 
     return;
   } catch (err) {
