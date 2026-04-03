@@ -204,8 +204,8 @@ function drawFooter(doc) {
 
   // Settings
   const rightMargin = 20;
-  const logoWidth = 50;
-  const gap = 10;
+  const logoWidth = 28;
+  const gap = 6;
 
   // Text width
   doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
