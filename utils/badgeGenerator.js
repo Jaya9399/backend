@@ -204,8 +204,8 @@ function drawFooter(doc) {
 
   // Settings
   const rightMargin = 20;
-  const logoWidth = 28;
-  const gap = 6;
+  const logoWidth = 50;
+  const gap = 10;
 
   // Text width
   doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
@@ -244,7 +244,7 @@ function drawFooter(doc) {
   );
 
   // Logos just below capsule
-  const logoY = pillY + 28;
+  const logoY = pillY + 34;
 
   safeImage(doc, assoc.logo1Path, logosX, logoY, logoWidth);
   safeImage(doc, assoc.logo2Path, logosX + logoWidth + gap, logoY, logoWidth);
