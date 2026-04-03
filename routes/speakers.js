@@ -106,7 +106,7 @@ router.post('/', async (req, res) => {
     if (typeof payload.slots === 'string') {
       try { payload.slots = JSON.parse(payload.slots); } catch { /* keep as string */ }
     }
-    
+
     const email = (payload.email || '').toString().trim();
     if (!isEmailLike(email)) {
       return res.status(400).json({ success: false, error: 'Valid email required' });
@@ -166,15 +166,17 @@ router.post('/', async (req, res) => {
     (async () => {
       try {
         if (!isEmailLike(doc.email)) return;
-        
-        console.log(`[DEBUG] Speaker created with company: "${doc.company}"`);
-        
-        const result = await sendTicketEmail({
-          entity: 'speakers',
-          record: doc,
-          options: { forceSend: false, includeBadge: true }
-        });
 
+        console.log(`[DEBUG] Speaker created with company: "${doc.company}"`);
+
+        const mail = buildSpeakerAckEmail({ name: doc.name });
+        await mailer.sendMail({
+          to: doc.email,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          from: mail.from,
+        });
         if (result && result.success) {
           await col.updateOne({ _id: r.insertedId }, {
             $unset: { email_failed: "", email_failed_at: "" },
