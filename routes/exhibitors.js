@@ -4,7 +4,7 @@ const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient'); // must expose getDb() or . db
 const { sendMail } = require('../utils/mailer'); // keep existing mailer
 const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized ticket email + badge sender
-
+const mailer = require('../utils/mailer');
 // parse JSON bodies for all routes in this router
 router.use(express.json({ limit: '5mb' }));
 
