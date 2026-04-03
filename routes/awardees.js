@@ -166,28 +166,26 @@ router.post('/', express.json(), async (req, res) => {
     const form = body.form || body || {};
 
     const addedByAdmin = !!body.added_by_admin;
+
     if (!addedByAdmin) {
       const email = (form.email || '').toString().trim();
       const verificationToken = body.verificationToken;
-      
-      console.log('[awardees] ========== OTP CHECK ==========');
-      console.log('[awardees] Email:', email);
-      console.log('[awardees] Role being checked:', 'awardee');
-      console.log('[awardees] Token received from frontend:', verificationToken);
-      
+
+      console.log('[awardees] OTP verification - email:', email);
+      console.log('[awardees] OTP verification - token:', verificationToken);
+
       if (!isEmailLike(email)) {
-        return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
+        return res.status(400).json({ success: false, error: 'Valid email required' });
       }
-      
+
+      // ✅ EXACT same pattern as visitors.js
       const isValid = await verifyOtpToken(db, 'awardee', email, verificationToken);
-      console.log('[awardees] OTP check result:', isValid);
-      
+
       if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
-      console.log('[awardees] OTP verification PASSED!');
+      console.log('[awardees] OTP verification PASSED');
     }
-
     // ✅ Extract company
     const companyName = extractCompany(form);
 
