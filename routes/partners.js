@@ -4,7 +4,7 @@ const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient');
 const { sendMail } = require('../utils/mailer');
 const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized ticket email + badge sender
-
+const { verifyOtpToken } = require('../utils/otpStore');
 // parse JSON bodies for this router
 router.use(express.json({ limit: '5mb' }));
 function generateTicketCode() {
@@ -146,13 +146,13 @@ router.post('/', async (req, res) => {
     const mobile = String(pick(['mobile', 'phone', 'contact', 'whatsapp']) || '').trim();
     const email = String(pick(['email', 'mail', 'emailId', 'email_id', 'contactEmail']) || '').trim();
 
-    // OTP verification (skip for admin-created partners)
     if (!body.added_by_admin) {
       if (!isEmailLike(email)) {
         return res.status(400).json({ success: false, error: 'Valid email required' });
       }
       const verificationToken = body.verificationToken;
-      if (!checkOtpToken('partner', email, verificationToken)) {
+      const isValid = await verifyOtpToken(db, 'partner', email, verificationToken);
+      if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
     }

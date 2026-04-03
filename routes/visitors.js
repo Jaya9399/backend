@@ -3,6 +3,8 @@ const router = express.Router();
 const mongo = require("../utils/mongoClient");
 const { ObjectId } = require("mongodb");
 const sendTicketEmail = require("../utils/sendTicketEmail"); // centralized email + badge sender
+const { verifyOtpToken } = require('../utils/otpStore');
+
 
 router.use(express.json({ limit: "6mb" }));
 // OTP verification helper (shared global store from otp.js)
@@ -117,7 +119,8 @@ router.post("/", async (req, res) => {
     const verificationToken = body.verificationToken || form.verificationToken;
 
     if (!isAdminCreate) {
-      if (!checkOtpToken("visitor", email, verificationToken)) {
+      const isValid = await verifyOtpToken(db, 'visitor', email, verificationToken);
+      if (!isValid) {
         return res.status(403).json({
           success: false,
           error: "Email not verified via OTP",
@@ -147,7 +150,7 @@ router.post("/", async (req, res) => {
     } else if (form.affiliation) {
       company = form.affiliation;
     }
-    
+
     // Also check in data field if present
     if (!company && form.data && form.data.company) {
       company = form.data.company;
@@ -189,9 +192,9 @@ router.post("/", async (req, res) => {
       try {
         const savedDoc = await coll.findOne({ _id: r.insertedId });
         if (!savedDoc || !isEmailLike(savedDoc.email)) return;
-        
+
         console.log(`[DEBUG] Visitor created with company: "${savedDoc.company}"`);
-        
+
         const result = await sendTicketEmail({
           entity: "visitors",
           record: savedDoc,

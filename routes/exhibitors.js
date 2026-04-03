@@ -5,6 +5,9 @@ const mongo = require('../utils/mongoClient'); // must expose getDb() or . db
 const { sendMail } = require('../utils/mailer'); // keep existing mailer
 const sendTicketEmail = require('../utils/sendTicketEmail'); // centralized ticket email + badge sender
 const mailer = require('../utils/mailer');
+const { verifyOtpToken } = require('../utils/otpStore');
+
+
 // parse JSON bodies for all routes in this router
 router.use(express.json({ limit: '5mb' }));
 
@@ -125,7 +128,8 @@ router.post('/', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
       }
       const verificationToken = body.verificationToken;
-      if (!checkOtpToken('exhibitor', email, verificationToken)) {
+      const isValid = await verifyOtpToken(db, 'exhibitor', email, verificationToken);
+      if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
     }

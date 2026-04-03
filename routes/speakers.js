@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient');
-const { sendMail } = require('../utils/mailer'); // for ACK email
+const { sendMail } = require('../utils/mailer');
+const mailer = require('../utils/mailer'); // for ACK email
 const sendTicketEmail = require('../utils/sendTicketEmail'); // for ticket email with badge
-
+const { verifyOtpToken } = require('../utils/otpStore');
 // parse JSON bodies for routes in this router
 router.use(express.json({ limit: '6mb' }));
 // OTP verification helper (shared global store from otp.js)
@@ -112,10 +113,10 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Valid email required' });
     }
 
-    // OTP verification (skip for admin)
     if (!payload.added_by_admin) {
       const verificationToken = payload.verificationToken;
-      if (!checkOtpToken('speaker', email, verificationToken)) {
+      const isValid = await verifyOtpToken(db, 'speaker', email, verificationToken);
+      if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
     }

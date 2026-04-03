@@ -7,7 +7,7 @@ const { ObjectId } = require('mongodb');
 const mongo = require('../utils/mongoClient');
 const mailer = require('../utils/mailer');
 const sendTicketEmail = require('../utils/sendTicketEmail');
-
+const { verifyOtpToken } = require('../utils/otpStore');
 // Try to reuse safeFieldName if available, otherwise provide local fallback
 
 // OTP verification helper (shared global store from otp.js)
@@ -203,7 +203,7 @@ router.post('/', express.json(), async (req, res) => {
         return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
       }
     
-      const isValid = checkOtpToken('awardee', email, verificationToken);
+      const isValid = await verifyOtpToken(db, 'awardee', email, verificationToken);
       console.log('[awardees] OTP check result:', isValid);
     
       if (!isValid) {

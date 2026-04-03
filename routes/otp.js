@@ -13,7 +13,7 @@
  *
  * NOTE: This file assumes a mongoClient util (getDb()/db) and nodemailer installed.
  */
-
+const { storeOtpToken } = require('../utils/otpStore');
 const express = require("express");
 const nodemailer = require("nodemailer");
 const mongoClient = require("../utils/mongoClient"); // uses getDb() or .db
@@ -378,18 +378,11 @@ router.post("/verify", express.json({ limit: "2mb" }), async (req, res) => {
     // ✅ generate verification token
     const verificationToken = crypto.randomUUID();
 
-    otpVerifiedStore.set(`verified::${role}::${emailKey}`, {
-      token: verificationToken,
-      expires: Date.now() + OTP_TTL_MS,
-    });
+    const db = await obtainDb();
+    await storeOtpToken(db, role, emailKey, verificationToken, OTP_TTL_MS);
+    console.log('[otp] Token stored in MongoDB for:', `${role}::${emailKey}`);
 
-    setTimeout(() => {
-      const k = `verified::${role}::${emailKey}`;
-      const r = otpVerifiedStore.get(k);
-      if (r && r.expires < Date.now()) otpVerifiedStore.delete(k);
-    }, OTP_TTL_MS).unref();
-
-    // ✅ DB lookup (INNER TRY)
+    
     try {
       const existing = await findExistingByEmailMongo(emailKey, role);
 
