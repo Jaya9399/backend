@@ -15,26 +15,6 @@ function generateTicketCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-// OTP verification helper (shared global store from otp.js)
-function checkOtpToken(role, email, token) {
-  if (!role || !email || !token) return false;
-
-  const store = global._otpVerifiedStore;
-  if (!store) return false;
-
-  const key = `verified::${role}::${email.toLowerCase()}`;
-  const info = store.get(key);
-
-  if (!info || info.token !== token) return false;
-  if (info.expires < Date.now()) {
-    store.delete(key);
-    return false;
-  }
-
-  store.delete(key); // single-use
-  return true;
-}
-
 async function obtainDb() {
   if (!mongo) return null;
   if (typeof mongo.getDb === 'function') return await mongo.getDb();
@@ -121,17 +101,25 @@ router.post('/', async (req, res) => {
 
     const body = req.body || {};
 
-    // OTP verification (skip if admin-created)
     if (!body.added_by_admin) {
       const email = (body.email || '').toString().trim();
+      const verificationToken = body.verificationToken;
+
+      console.log('[exhibitors] ========== OTP CHECK ==========');
+      console.log('[exhibitors] Email:', email);
+      console.log('[exhibitors] Token:', verificationToken);
+
       if (!isEmailLike(email)) {
         return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
       }
-      const verificationToken = body.verificationToken;
+
       const isValid = await verifyOtpToken(db, 'exhibitor', email, verificationToken);
+      console.log('[exhibitors] OTP check result:', isValid);
+
       if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
+      console.log('[exhibitors] OTP verification PASSED!');
     }
 
     function pickValue(obj, keys) {
