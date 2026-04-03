@@ -8,27 +8,6 @@ const mongo = require('../utils/mongoClient');
 const mailer = require('../utils/mailer');
 const sendTicketEmail = require('../utils/sendTicketEmail');
 const { verifyOtpToken } = require('../utils/otpStore');
-// Try to reuse safeFieldName if available, otherwise provide local fallback
-
-// OTP verification helper (shared global store from otp.js)
-function checkOtpToken(role, email, token) {
-  if (!role || !email || !token) return false;
-
-  const store = global._otpVerifiedStore;
-  if (!store) return false;
-
-  const key = `verified::${role}::${email.toLowerCase()}`;
-  const info = store.get(key);
-
-  if (!info || info.token !== token) return false;
-  if (info.expires < Date.now()) {
-    store.delete(key);
-    return false;
-  }
-
-  store.delete(key); // single-use
-  return true;
-}
 
 function isEmailLike(v) {
   return typeof v === 'string' && /\S+@\S+\.\S+/.test(v);
@@ -189,23 +168,20 @@ router.post('/', express.json(), async (req, res) => {
     const addedByAdmin = !!body.added_by_admin;
     if (!addedByAdmin) {
       const email = (form.email || '').toString().trim();
-      const verificationToken = body.verificationToken; // ✅ Define FIRST!
+      const verificationToken = body.verificationToken;
       
       console.log('[awardees] ========== OTP CHECK ==========');
       console.log('[awardees] Email:', email);
       console.log('[awardees] Role being checked:', 'awardee');
-      console.log('[awardees] Token received from frontend:', verificationToken); // ✅ Now defined!
-      console.log('[awardees] Looking for key:', `verified::awardee::${email.toLowerCase()}`);
-      console.log('[awardees] Current otpVerifiedStore size:', global._otpVerifiedStore?.size);
-      console.log('[awardees] All store keys:', global._otpVerifiedStore ? Array.from(global._otpVerifiedStore.keys()) : 'no store');
-    
+      console.log('[awardees] Token received from frontend:', verificationToken);
+      
       if (!isEmailLike(email)) {
         return res.status(400).json({ success: false, error: 'Valid email required for OTP verification' });
       }
-    
+      
       const isValid = await verifyOtpToken(db, 'awardee', email, verificationToken);
       console.log('[awardees] OTP check result:', isValid);
-    
+      
       if (!isValid) {
         return res.status(403).json({ success: false, error: 'Email not verified via OTP' });
       }
