@@ -122,11 +122,11 @@ const ASSOCIATION = {
   logo1Path:      path.join(ASSETS_LOGO, "railchamber_logo.png"),
   logo1X:         205,
   logo1Y:         428, 
-  logo1Width:     55,
+  logo1Width:     28,
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
   logo2X:         260,
   logo2Y:         426, 
-  logo2Width:     55,
+  logo2Width:     28,
 };
 
 const RIBBON = {
