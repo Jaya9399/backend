@@ -137,7 +137,7 @@ router.get("/", async (req, res) => {
 
     console.log("[ticketDownload] ✅ PDF generated successfully, size:", pdfBuffer.length);
 
-    const filename = `RailTrans-${entityKey}-${doc.ticket_code || id}.pdf`;
+    const filename = `RailTrans-${entityKey}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
