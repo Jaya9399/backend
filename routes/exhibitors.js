@@ -213,20 +213,21 @@ router.post('/', async (req, res) => {
         const to = saved.email || body.email || null;
         if (to && isEmailLike(to)) {
           const mail = buildExhibitorAckEmail({ name: saved.name });
-          await mailer.sendMail({
-            to: saved.email,
-            subject: mail.subject,
-            text: mail.text,
-            html: mail.html,
-            from: mail.from,
-          });
-
-          if (result && result.success) {
+          try {
+            await mailer.sendMail({
+              to: saved.email,
+              subject: mail.subject,
+              text: mail.text,
+              html: mail.html,
+              from: mail.from,
+            });
+            console.log('[exhibitors] ack mail sent to', saved.email);
             await col.updateOne({ _id: toObjectId(insertedId) }, {
               $unset: { email_failed: "", email_failed_at: "" },
               $set: { email_sent_at: new Date() }
             });
-          } else {
+          } catch (e) {
+            console.error('[exhibitors] ack mail failed:', e && (e.message || e));
             await col.updateOne({ _id: toObjectId(insertedId) }, {
               $set: { email_failed: true, email_failed_at: new Date() }
             });
