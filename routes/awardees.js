@@ -169,7 +169,7 @@ router.post('/', express.json(), async (req, res) => {
 
     if (!addedByAdmin) {
       const email = (form.email || '').toString().trim();
-      const verificationToken = body.verificationToken;
+      const verificationToken = body.verificationToken || form.verificationToken;
 
       console.log('[awardees] OTP verification - email:', email);
       console.log('[awardees] OTP verification - token:', verificationToken);
