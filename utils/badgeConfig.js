@@ -8,7 +8,7 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
-const PAGE = { width: 400, height: 580 }; // Slightly increased to accommodate everything
+const PAGE = { width: 400, height: 580 };
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
@@ -31,25 +31,35 @@ const RAILTRANS_LOGO = {
 // Bharat Mandapam logo — top-right (INCREASED SIZE)
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x:     PAGE.width - 82, 
-  y:     12, 
-  width: 74, 
+  x:     PAGE.width - 100,
+  y:     8,
+  width: 92,
 };
 
-// Edition Pill
-const EDITION_PILL = {
-  text:      "6th EDITION",
-  x:         195,
-  y:         16,
-  bgColor:   "#1B3A8A",
-  textColor: "#FFFFFF",
-  fontSize:  8,
-};
+// REMOVED: EDITION_PILL - No longer showing "6th EDITION"
 
-// Date Pills
+// Date Pills (03 and 04 with WHITE text on RED background)
 const DATE_PILLS = {
-  pill1: { text: "03", x: 195, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
-  pill2: { text: "04", x: 234, y: 40, width: 34, height: 34, bgColor: "#1B3A8A", textColor: "#FFFFFF", fontSize: 18 },
+  pill1: { 
+    text: "03", 
+    x: 195, 
+    y: 40, 
+    width: 34, 
+    height: 34, 
+    bgColor: "#C8102E",
+    textColor: "#FFFFFF",
+    fontSize: 18 
+  },
+  pill2: { 
+    text: "04", 
+    x: 234, 
+    y: 40, 
+    width: 34, 
+    height: 34, 
+    bgColor: "#C8102E",
+    textColor: "#FFFFFF",
+    fontSize: 18 
+  },
   monthX: 274,
   monthY: 40,
   venueY: 62,
@@ -59,11 +69,11 @@ const DATE_PILLS = {
 const TAGLINE = {
   y:               100,
   height:          24,
-  bgColor:         "#EFEFEF",
+  bgColor:         "#000000",
   text:            "Asia's Second Largest Event for Railways, Transportation & Semiconductor Industry",
-  pillBgColor:     "#FFFFFF",
+  pillBgColor:     "#C8102E",
   pillBorderColor: "#C8102E",
-  textColor:       "#222222",
+  textColor:       "#FFFFFF",
   fontSize:        7,
 };
 
@@ -98,40 +108,41 @@ const TEXT_AREA = {
   companyFontSize: 12,
 };
 
-// ─── Footer Logos with Pills ──────────────────────────────────────────────────
+// ─── Footer Logos with INCREASED SIZES and REDUCED WHITESPACE ─────────────────
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
   labelX:         20,
-  labelY:         410, 
+  labelY:         410,      // MOVED UP slightly
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
-  labelFontSize:  7,
+  labelFontSize:  9,        // INCREASED font size
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
   logoX:          20,
-  logoY:          428, 
-  logoWidth:      110,
+  logoY:          422,      // ADJUSTED position
+  logoWidth:      130,      // INCREASED width
 };
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
-  labelX:         235,
-  labelY:         410, 
+  labelX:         220,      // MOVED to accommodate larger logos
+  labelY:         410,      // MOVED UP
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
-  labelFontSize:  7,
+  labelFontSize:  8,        // INCREASED font size
   logo1Path:      path.join(ASSETS_LOGO, "railchamber_logo.png"),
-  logo1X:         205,
-  logo1Y:         428, 
-  logo1Width:     50,
+  logo1X:         195,      // ADJUSTED position
+  logo1Y:         420,      // ADJUSTED position
+  logo1Width:     65,       // INCREASED width
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
-  logo2X:         260,
-  logo2Y:         426, 
-  logo2Width:     50,
+  logo2X:         270,      // ADJUSTED position
+  logo2Y:         418,      // ADJUSTED position
+  logo2Width:     65,       // INCREASED width
 };
 
+// RIBBON - Reduced whitespace below
 const RIBBON = {
-  y: 510, 
-  height: 60, 
+  y: 500,           // MOVED UP (was 510) - reduces whitespace
+  height: 60,
   textSize: 28,
   borderRadius: 20,
   textColor: "#FFFFFF",
@@ -143,7 +154,7 @@ module.exports = {
   HEADER,
   RAILTRANS_LOGO,
   MANDAPAM,
-  EDITION_PILL,
+  // EDITION_PILL removed - not exporting anymore
   DATE_PILLS,
   TAGLINE,
   BODY,
