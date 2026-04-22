@@ -75,25 +75,49 @@ function drawHeader(doc) {
   // RailTrans logo — left
   safeImage(doc, C.RAILTRANS_LOGO.path, C.RAILTRANS_LOGO.x, C.RAILTRANS_LOGO.y, C.RAILTRANS_LOGO.width);
 
-  // "6th EDITION" pill
-  drawPill(doc, ep.text, ep.x, ep.y, ep.bgColor, ep.textColor, ep.fontSize, 16, 18);
+  // Optional "EDITION" pill (may be removed in config)
+  if (ep && typeof ep.text === "string" && ep.text.trim() !== "") {
+    drawPill(doc, ep.text, ep.x, ep.y, ep.bgColor, ep.textColor, ep.fontSize, 16, 18);
+  }
 
   // Date squares "03" "04"
-  drawSquarePill(doc, dp.pill1.text, dp.pill1.x, dp.pill1.y, dp.pill1.width, dp.pill1.height,
-    dp.pill1.bgColor, dp.pill1.textColor, dp.pill1.fontSize);
-  drawSquarePill(doc, dp.pill2.text, dp.pill2.x, dp.pill2.y, dp.pill2.width, dp.pill2.height,
-    dp.pill2.bgColor, dp.pill2.textColor, dp.pill2.fontSize);
+  if (dp?.pill1?.text) {
+    drawSquarePill(
+      doc,
+      dp.pill1.text,
+      dp.pill1.x,
+      dp.pill1.y,
+      dp.pill1.width,
+      dp.pill1.height,
+      dp.pill1.bgColor,
+      dp.pill1.textColor,
+      dp.pill1.fontSize
+    );
+  }
+  if (dp?.pill2?.text) {
+    drawSquarePill(
+      doc,
+      dp.pill2.text,
+      dp.pill2.x,
+      dp.pill2.y,
+      dp.pill2.width,
+      dp.pill2.height,
+      dp.pill2.bgColor,
+      dp.pill2.textColor,
+      dp.pill2.fontSize
+    );
+  }
 
   // "JULY 2026" — bold, to right of date squares
-  const monthMaxWidth = C.PAGE.width - dp.monthX - 8;
+  const monthMaxWidth = C.PAGE.width - (dp?.monthX ?? 0) - 8;
   doc.fillColor("#000000").font("Helvetica-Bold").fontSize(20)
-    .text("JULY 2026", dp.monthX, dp.monthY,
+    .text("JULY 2026", dp?.monthX ?? 0, dp?.monthY ?? 0,
       { width: monthMaxWidth, lineBreak: false });
 
   // Venue — smaller, below JULY 2026
-  const venueMaxWidth = C.PAGE.width - dp.monthX - 8;
+  const venueMaxWidth = C.PAGE.width - (dp?.monthX ?? 0) - 8;
   doc.fillColor("#555555").font("Helvetica").fontSize(6.5)
-    .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp.monthX, dp.venueY,
+    .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp?.monthX ?? 0, dp?.venueY ?? 0,
       { width: venueMaxWidth, lineBreak: false });
 
   // Bharat Mandapam logo — top-right
