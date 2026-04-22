@@ -72,14 +72,9 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // Validate ObjectId BEFORE using it
-    if (!ObjectId.isValid(String(id))) {
-      console.error("[ticketDownload] Invalid ObjectId:", id);
-      return res.status(400).json({ 
-        error: "Invalid ticket ID format",
-        received: id
-      });
-    }
+    // Accept either Mongo _id OR ticket_code (6-digit etc.). Prefer _id when valid.
+    const idStr = String(id);
+    const isObjectId = ObjectId.isValid(idStr);
 
     const db = await obtainDb();
     if (!db) {
@@ -94,7 +89,9 @@ router.get("/", async (req, res) => {
 
     let doc;
     try {
-      doc = await collection.findOne({ _id: new ObjectId(id) });
+      doc = isObjectId
+        ? await collection.findOne({ _id: new ObjectId(idStr) })
+        : await collection.findOne({ ticket_code: idStr });
     } catch (dbErr) {
       console.error("[ticketDownload] DB query error:", dbErr.message);
       return res.status(500).json({ error: "Database query failed" });

@@ -401,14 +401,8 @@ exports.webhookHandler = async (req, res) => {
     try {
       let visitorIdToUpdate = null;
       if (payload && payload.reference_id) {
-        // Check if it's a MongoDB ObjectId
-        if (ObjectId.isValid(payload.reference_id)) {
-          visitorIdToUpdate = payload.reference_id;
-        } else if (/^\d+$/.test(String(payload.reference_id))) {
-          visitorIdToUpdate = Number(payload.reference_id);
-        } else {
-          visitorIdToUpdate = payload.reference_id;
-        }
+        // Keep as string; may be ObjectId OR ticket_code or any reference
+        visitorIdToUpdate = String(payload.reference_id);
       } else if (providerOrderId) {
         const db = await obtainDb();
         if (db) {
@@ -443,10 +437,12 @@ exports.webhookHandler = async (req, res) => {
               updateData.paid_at = new Date();
             }
 
-            await visitorsCol.updateOne(
-              { _id: new ObjectId(visitorIdToUpdate) },
-              { $set: updateData }
-            );
+            // Update by _id if possible, else fallback to ticket_code
+            const visitorFilter = ObjectId.isValid(visitorIdToUpdate)
+              ? { _id: new ObjectId(visitorIdToUpdate) }
+              : { ticket_code: String(visitorIdToUpdate) };
+
+            await visitorsCol.updateOne(visitorFilter, { $set: updateData });
           }
         } catch (vErr) {
           console.warn("[DB] visitor update after webhook failed:", vErr && vErr.message);

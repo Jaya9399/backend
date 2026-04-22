@@ -305,7 +305,22 @@ async function generateBadgePDF(entity, data, options = {}) {
       const ticketCode = data?.ticket_code || data?.ticketCode || data?.data?.ticket_code;
       if (!ticketCode) throw new Error("ticket_code missing");
 
-      const isPaid = Boolean(data.txId) || data.paid === true || Number(data.amount) > 0;
+      // Payment signals vary by collection/flow; treat any positive ticket amount as paid.
+      const paidAmount =
+        Number(data.amount) ||
+        Number(data.amount_paid) ||
+        Number(data.ticket_total) ||
+        Number(data.ticket_price) ||
+        Number(data.ticketTotal) ||
+        Number(data.ticketPrice) ||
+        Number(data?.data?.amount) ||
+        Number(data?.data?.ticket_total) ||
+        0;
+      const isPaid =
+        Boolean(data.txId || data.tx_id || data.transactionId || data.paymentId || data.razorpay_payment_id) ||
+        data.paid === true ||
+        String(data.payment_status || "").toLowerCase() === "paid" ||
+        paidAmount > 0;
       const { ribbon: ribbonLabel, color: themeColor } = getBadgeTheme({ entity, isPaid });
 
       console.log(`[${ribbonLabel}] ${data.name || "(no name)"}`);
