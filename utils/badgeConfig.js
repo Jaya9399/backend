@@ -8,7 +8,8 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
-const PAGE = { width: 400, height: 580 };
+// Match page height to artwork to avoid bottom white gap.
+const PAGE = { width: 400, height: 560 };
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
@@ -43,26 +44,27 @@ const DATE_PILLS = {
   pill1: { 
     text: "03", 
     x: 195, 
-    y: 40, 
+    y: 22, 
     width: 34, 
     height: 34, 
-    bgColor: "#C8102E",
-    textColor: "#FFFFFF",
+    bgColor: "	#d8031c",
+    textColor: " #FFFFFF",
     fontSize: 18 
   },
   pill2: { 
     text: "04", 
     x: 234, 
-    y: 40, 
+    y: 22, 
     width: 34, 
     height: 34, 
-    bgColor: "#C8102E",
-    textColor: "#FFFFFF",
+    bgColor: "rgb(13, 37, 197)",
+    textColor: " #FFFFFF",
     fontSize: 18 
   },
-  monthX: 274,
-  monthY: 40,
-  venueY: 62,
+  // Place month + venue on the next line to avoid collision with Mandapam logo
+  monthX: 195,
+  monthY: 62,
+  venueY: 78,
 };
 
 // ─── Tagline Bar ─────────────────────────────────────────────────────────────
@@ -112,31 +114,33 @@ const TEXT_AREA = {
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
   labelX:         20,
-  labelY:         410,      // MOVED UP slightly
+  labelY:         405,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  9,        // INCREASED font size
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
   logoX:          20,
-  logoY:          422,      // ADJUSTED position
+  logoY:          418,
   logoWidth:      130,      // INCREASED width
 };
 
 const ASSOCIATION = {
   label:          "IN ASSOCIATION WITH",
   labelX:         220,      // MOVED to accommodate larger logos
-  labelY:         410,      // MOVED UP
+  labelY:         405,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
   labelFontSize:  8,        // INCREASED font size
   logo1Path:      path.join(ASSETS_LOGO, "railchamber_logo.png"),
   logo1X:         195,      // ADJUSTED position
-  logo1Y:         420,      // ADJUSTED position
+  logo1Y:         416,
   logo1Width:     65,       // INCREASED width
   logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
   logo2X:         270,      // ADJUSTED position
-  logo2Y:         418,      // ADJUSTED position
+  logo2Y:         414,
   logo2Width:     65,       // INCREASED width
+  // Used by generator to size both association logos consistently
+  logoWidth:      34,
 };
 
 // RIBBON - Reduced whitespace below

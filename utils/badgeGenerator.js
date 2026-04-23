@@ -228,7 +228,7 @@ function drawFooter(doc) {
 
   // Settings
   const rightMargin = 20;
-  const logoWidth = 28;
+  const logoWidth = Number(assoc.logoWidth) || 34;
   const gap = 6;
 
   // Text width
