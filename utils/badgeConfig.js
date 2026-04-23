@@ -66,7 +66,8 @@ const DATE_PILLS = {
   // Add breathing room from the Mandapam logo and keep alignment clean
   monthX: 255,
   monthY: 40,
-  venueY: 62,
+  // Venue sits under the Mandapam logo with some gap
+  venueY: 70,
 };
 
 // ─── Tagline Bar ─────────────────────────────────────────────────────────────

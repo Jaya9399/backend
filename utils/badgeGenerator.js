@@ -108,19 +108,25 @@ function drawHeader(doc) {
     );
   }
 
-  // "JULY 2026" — bold, to right of date squares
+  // "JULY" then "2026" — to right of date squares (no overlap with Mandapam)
   const mandapamLeftEdge = Number(C?.MANDAPAM?.x);
   const rightLimit = Number.isFinite(mandapamLeftEdge) ? mandapamLeftEdge - 10 : C.PAGE.width - 8;
   const monthMaxWidth = Math.max(40, rightLimit - (dp?.monthX ?? 0));
   doc.fillColor("#000000").font("Helvetica-Bold").fontSize(20)
-    .text("JULY 2026", dp?.monthX ?? 0, dp?.monthY ?? 0,
+    .text("JULY", dp?.monthX ?? 0, dp?.monthY ?? 0,
       { width: monthMaxWidth, lineBreak: false });
 
-  // Venue — smaller, below JULY 2026
-  const venueMaxWidth = Math.max(40, rightLimit - (dp?.monthX ?? 0));
+  doc.fillColor("#000000").font("Helvetica-Bold").fontSize(20)
+    .text("2026", dp?.monthX ?? 0, (dp?.monthY ?? 0) + 20,
+      { width: monthMaxWidth, lineBreak: false });
+
+  // Venue — centered under Mandapam logo
+  const venueX = Number(C?.MANDAPAM?.x) || (dp?.monthX ?? 0);
+  const venueW = Number(C?.MANDAPAM?.width) || Math.max(40, rightLimit - (dp?.monthX ?? 0));
+  const venueMaxWidth = venueW;
   doc.fillColor("#555555").font("Helvetica").fontSize(6.5)
-    .text("BHARAT MANDAPAM, NEW DELHI, INDIA", dp?.monthX ?? 0, dp?.venueY ?? 0,
-      { width: venueMaxWidth, lineBreak: false });
+    .text("BHARAT MANDAPAM, NEW DELHI, INDIA", venueX, dp?.venueY ?? 0,
+      { width: venueMaxWidth, align: "center", lineBreak: false });
 
   // Bharat Mandapam logo — top-right
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
