@@ -34,8 +34,8 @@ const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
   // Drop it slightly to avoid sticking to the top edge
   // Keep it in the far-right column so it never overlaps the date/month text
-  width: 64,
-  x:     PAGE.width - 64 - 10,
+  width: 76,
+  x:     PAGE.width - 76 - 10,
   y:     20,
 };
 
@@ -45,7 +45,7 @@ const MANDAPAM = {
 const DATE_PILLS = {
   pill1: { 
     text: "03", 
-    x: 195, 
+    x: 175, 
     y: 40,
     width: 34, 
     height: 34, 
@@ -55,7 +55,7 @@ const DATE_PILLS = {
   },
   pill2: { 
     text: "04", 
-    x: 234, 
+    x: 214, 
     y: 40,
     width: 34, 
     height: 34, 
@@ -64,7 +64,7 @@ const DATE_PILLS = {
     fontSize: 18 
   },
   // Add breathing room from the Mandapam logo and keep alignment clean
-  monthX: 262,
+  monthX: 255,
   monthY: 40,
   venueY: 62,
 };
