@@ -32,9 +32,10 @@ const RAILTRANS_LOGO = {
 // Bharat Mandapam logo — top-right (INCREASED SIZE)
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  x:     PAGE.width - 100,
-  y:     8,
-  width: 92,
+  // Drop it slightly to avoid sticking to the top edge
+  x:     PAGE.width - 92,
+  y:     18,
+  width: 82,
 };
 
 // REMOVED: EDITION_PILL - No longer showing "6th EDITION"
@@ -44,27 +45,27 @@ const DATE_PILLS = {
   pill1: { 
     text: "03", 
     x: 195, 
-    y: 22, 
+    y: 40,
     width: 34, 
     height: 34, 
-    bgColor: "	#d8031c",
-    textColor: " #FFFFFF",
+    bgColor: "#d8031c",
+    textColor: "#FFFFFF",
     fontSize: 18 
   },
   pill2: { 
     text: "04", 
     x: 234, 
-    y: 22, 
+    y: 40,
     width: 34, 
     height: 34, 
-    bgColor: "rgb(13, 37, 197)",
-    textColor: " #FFFFFF",
+    bgColor: "#0d25c5",
+    textColor: "#FFFFFF",
     fontSize: 18 
   },
-  // Place month + venue on the next line to avoid collision with Mandapam logo
-  monthX: 195,
-  monthY: 62,
-  venueY: 78,
+  // Add breathing room from the Mandapam logo and keep alignment clean
+  monthX: 274,
+  monthY: 40,
+  venueY: 62,
 };
 
 // ─── Tagline Bar ─────────────────────────────────────────────────────────────
