@@ -33,9 +33,10 @@ const RAILTRANS_LOGO = {
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
   // Drop it slightly to avoid sticking to the top edge
-  x:     PAGE.width - 92,
-  y:     18,
-  width: 82,
+  // Keep it in the far-right column so it never overlaps the date/month text
+  width: 64,
+  x:     PAGE.width - 64 - 10,
+  y:     20,
 };
 
 // REMOVED: EDITION_PILL - No longer showing "6th EDITION"
@@ -63,7 +64,7 @@ const DATE_PILLS = {
     fontSize: 18 
   },
   // Add breathing room from the Mandapam logo and keep alignment clean
-  monthX: 274,
+  monthX: 262,
   monthY: 40,
   venueY: 62,
 };
