@@ -39,6 +39,17 @@ const MANDAPAM = {
   y:     20,
 };
 
+// Bharat Mandapam text under the logo (tighter + bigger)
+const MANDAPAM_TEXT = {
+  line1: "BHARAT MANDAPAM",
+  line2: "NEW DELHI, INDIA",
+  fontSizeLine1: 8.5,
+  fontSizeLine2: 6.7,
+  gapFromLogo: 4,   // vertical gap between logo bottom and line1
+  lineGap: 1.5,     // gap between line1 and line2
+  color: "#555555",
+};
+
 // REMOVED: EDITION_PILL - No longer showing "6th EDITION"
 
 // Date Pills (03 and 04 with WHITE text on RED background)
@@ -75,7 +86,7 @@ const TAGLINE = {
   y:               100,
   height:          24,
   bgColor:         "#000000",
-  text:            "Asia's Second Largest Event for Railways, Transportation & Semiconductor Industry",
+  text:            "Asia's Largest Event for Railways, Transportation & Semiconductor Industry",
   pillBgColor:     "#C8102E",
   pillBorderColor: "#C8102E",
   textColor:       "#FFFFFF",
@@ -103,7 +114,8 @@ const QR_CARD = {
   borderWidth: 0.8,
 };
 
-const QR = { size: 150 }; 
+// QR is square; "wider" == slightly larger
+const QR = { size: 168 };
 
 // ─── Text Areas ──────────────────────────────────────────────────────────────
 const TEXT_AREA = {
@@ -111,6 +123,8 @@ const TEXT_AREA = {
   companyY:        380,
   nameFontSize:    16, 
   companyFontSize: 12,
+  // Extra spacing so name/company sit a bit lower
+  gapAfterQr:      22,
 };
 
 // ─── Footer Logos with INCREASED SIZES and REDUCED WHITESPACE ─────────────────
@@ -143,7 +157,8 @@ const ASSOCIATION = {
   logo2Y:         414,
   logo2Width:     65,       // INCREASED width
   // Used by generator to size both association logos consistently
-  logoWidth:      34,
+  logoWidth:      44,
+  logoGapFromLabel: 10,
 };
 
 // RIBBON - Reduced whitespace below
@@ -161,6 +176,7 @@ module.exports = {
   HEADER,
   RAILTRANS_LOGO,
   MANDAPAM,
+  MANDAPAM_TEXT,
   // EDITION_PILL removed - not exporting anymore
   DATE_PILLS,
   TAGLINE,
