@@ -184,7 +184,7 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
   doc.stroke();
 
-  // Generate QR code with larger size
+  // Generate QR code
   const qrPayload = mode === "scan"
     ? ticketCode
     : JSON.stringify({ ticket_code: ticketCode, entity });
@@ -196,19 +196,19 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   });
   const qrBuf = Buffer.from(qrDataUrl.split(",")[1], "base64");
   
+  // Center QR code with less top margin
   const qrX = qc.x + (qc.width - C.QR.size) / 2;
-  const qrY = qc.y + 20; // Adjusted for larger QR
+  const qrY = qc.y + 12;  // REDUCED from 20 to 12
   doc.image(qrBuf, qrX, qrY, { width: C.QR.size });
 
-  // Calculate text starting position
+  // Calculate text starting position - less gap after QR
   const textStartY = qrY + C.QR.size + (Number(C?.TEXT_AREA?.gapAfterQr) || 15);
   
-  // Draw NAME - BOLDER AND BIGGER
+  // Draw NAME
   doc.fillColor("#000")
     .font("Helvetica-Bold")
     .fontSize(C.TEXT_AREA.nameFontSize);
   
-  // Calculate name height
   const nameHeight = doc.heightOfString(name, {
     width: qc.width - 30,
     align: "center"
@@ -219,14 +219,13 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
     align: "center"
   });
 
-  // Draw COMPANY - BOLDER AND BIGGER
+  // Draw COMPANY
   if (company && company.trim() !== "" && company !== "UNDEFINED" && company !== "NULL") {
-    doc.fillColor("#333") // Darker for better contrast
-      .font("Helvetica-Bold") // Make company bold too
+    doc.fillColor("#333")
+      .font("Helvetica-Bold")
       .fontSize(C.TEXT_AREA.companyFontSize);
     
-    // Position company below name with spacing
-    const companyY = textStartY + nameHeight + 10;
+    const companyY = textStartY + nameHeight + 6;  // REDUCED from 10 to 6
     
     doc.text(company, qc.x + 15, companyY, {
       width: qc.width - 30,
@@ -236,62 +235,39 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   }
 }
 
-
 function drawFooter(doc) {
   const org = C.ORGANISED_BY;
-  drawPill(doc, org.label, org.labelX, org.labelY,
-    org.labelBgColor, org.labelTextColor, org.labelFontSize, 16, 15);
-  safeImage(doc, org.logoPath, org.logoX, org.logoY, org.logoWidth);
-
-  const assoc = C.ASSOCIATION;
-
-  // Settings
-  const rightMargin = 20;
-  const logoWidth = Number(assoc.logoWidth) || 34;
-  const gap = 6;
-
-  // Text width
-  doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
-
-  // Force bigger capsule width
-  const pillWidth = doc.widthOfString(assoc.label) + (24 * 2);
-
-  // Logos width
-  const logosWidth = (logoWidth * 2) + gap;
-
-  // Block width
-  const blockWidth = Math.max(pillWidth, logosWidth);
-
-  // Right align block
-  const rightEdge = C.PAGE.width - rightMargin;
-  const blockStartX = rightEdge - blockWidth;
-
-  // Center elements
-  const pillX = blockStartX + (blockWidth - pillWidth) / 2;
-  const logosX = blockStartX + (blockWidth - logosWidth) / 2;
-
+  
+  // Center everything
+  const centerX = C.PAGE.width / 2;
+  
+  // Calculate dimensions
+  doc.font("Helvetica-Bold").fontSize(org.labelFontSize);
+  const labelWidth = doc.widthOfString(org.label) + 40; // padding for capsule
+  const logoWidth = Number(org.logoWidth) || 160;
+  
+  // Position elements centered
+  const labelX = centerX - (labelWidth / 2);
+  const logoX = centerX - (logoWidth / 2);
+  
   // Draw capsule
-  const pillY = assoc.labelY;
-
+  const labelY = 400;  // Positioned with space from QR card
   drawPill(
-    doc,
-    assoc.label,
-    pillX,
-    pillY,
-    assoc.labelBgColor,
-    assoc.labelTextColor,
-    assoc.labelFontSize,
-    24,
-    24
+    doc, 
+    org.label, 
+    labelX, 
+    labelY, 
+    org.labelBgColor, 
+    org.labelTextColor, 
+    org.labelFontSize, 
+    20,  // padding
+    20   // height
   );
-
-  // Logos just below capsule (slightly closer + bigger)
-  const logoY = pillY + 24 + (Number(assoc.logoGapFromLabel) || 4);
-
-  safeImage(doc, assoc.logo1Path, logosX, logoY, logoWidth);
-  safeImage(doc, assoc.logo2Path, logosX + logoWidth + gap, logoY, logoWidth);
+  
+  // Draw logo with spacing below capsule
+  const logoY = labelY + 28;  // Space between capsule and logo
+  safeImage(doc, org.logoPath, logoX, logoY, logoWidth);
 }
-
 function drawRibbon(doc, themeColor, ribbonLabel) {
   const R = C.RIBBON;
 

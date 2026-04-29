@@ -8,7 +8,6 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
-// Match page height to artwork to avoid bottom white gap.
 const PAGE = { width: 400, height: 560 };
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
@@ -29,31 +28,26 @@ const RAILTRANS_LOGO = {
   width: 148,
 };
 
-// Bharat Mandapam logo — top-right (INCREASED SIZE)
+// Bharat Mandapam logo — RIGHT SIDE, LARGER, SAME LINE
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  // Drop it slightly to avoid sticking to the top edge
-  // Keep it in the far-right column so it never overlaps the date/month text
-  width: 76,
-  x:     PAGE.width - 76 - 10,
-  y:     20,
+  width: 90,  // INCREASED from 76 to 90
+  x:     PAGE.width - 90 - 10,  // Adjusted for new width
+  y:     16,  // Moved up to be in same line as RailTrans logo
 };
 
-// Bharat Mandapam text under the logo (tighter + bigger)
+// Bharat Mandapam text - Positioned to the right of date pills
 const MANDAPAM_TEXT = {
   line1: "BHARAT MANDAPAM",
   line2: "NEW DELHI, INDIA",
-  // Explicit Y so it never overwrites the logo
-  y: 50,
+  y: 66,  // Adjusted position
   fontSizeLine1: 8.2,
   fontSizeLine2: 8.2,
-  lineGap: 0.5,     // gap between line1 and line2
+  lineGap: 0.5,
   color: "#555555",
 };
 
-// REMOVED: EDITION_PILL - No longer showing "6th EDITION"
-
-// Date Pills (03 and 04 with WHITE text on RED background)
+// Date Pills (03 and 04)
 const DATE_PILLS = {
   pill1: { 
     text: "03", 
@@ -75,10 +69,8 @@ const DATE_PILLS = {
     textColor: "#FFFFFF",
     fontSize: 18 
   },
-  // Add breathing room from the Mandapam logo and keep alignment clean
   monthX: 255,
   monthY: 40,
-  // Venue sits under the Mandapam logo with some gap
   venueY: 70,
 };
 
@@ -97,16 +89,16 @@ const TAGLINE = {
 // ─── Body ────────────────────────────────────────────────────────────────────
 const BODY = {
   startY:         124,
-  endY:           500, 
+  endY:           475,  // Reduced to minimize whitespace
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
   overlayOpacity: 185,
 };
 
-// ─── QR Card ─────────────────────────────────────────────────────────────────
+// ─── QR Card - Reduced height to remove whitespace ────────────────────────────
 const QR_CARD = {
   width:       250, 
-  height:      260, 
+  height:      230,  // REDUCED from 260 to 230
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -115,8 +107,8 @@ const QR_CARD = {
   borderWidth: 0.8,
 };
 
-// QR is square; "wider" == slightly larger
-const QR = { size: 168 };
+// QR code - Slightly smaller to fit better
+const QR = { size: 150 };  // REDUCED from 168 to 150
 
 // ─── Text Areas ──────────────────────────────────────────────────────────────
 const TEXT_AREA = {
@@ -124,48 +116,25 @@ const TEXT_AREA = {
   companyY:        380,
   nameFontSize:    16, 
   companyFontSize: 12,
-  // Extra spacing so name/company sit a bit lower
-  gapAfterQr:      22,
+  gapAfterQr:      15,  // REDUCED from 22 to 15
 };
 
-// ─── Footer Logos with INCREASED SIZES and REDUCED WHITESPACE ─────────────────
+// ─── Footer - Centered Organised By section ──────────────────────────────────
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
-  labelX:         20,
-  labelY:         405,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
-  labelFontSize:  9,        // INCREASED font size
+  labelFontSize:  10,  // INCREASED for better visibility
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
-  logoX:          20,
-  logoY:          418,
-  logoWidth:      130,      // INCREASED width
+  logoWidth:      160,  // INCREASED width for centered layout
 };
 
-const ASSOCIATION = {
-  label:          "IN ASSOCIATION WITH",
-  labelX:         220,      // MOVED to accommodate larger logos
-  labelY:         405,
-  labelBgColor:   "#1B3A8A",
-  labelTextColor: "#FFFFFF",
-  labelFontSize:  8,        // INCREASED font size
-  logo1Path:      path.join(ASSETS_LOGO, "railchamber_logo.png"),
-  logo1X:         195,      // ADJUSTED position
-  logo1Y:         416,
-  logo1Width:     65,       // INCREASED width
-  logo2Path:      path.join(ASSETS_LOGO, "Indian_Railway_Logo_2.png"),
-  logo2X:         270,      // ADJUSTED position
-  logo2Y:         414,
-  logo2Width:     65,       // INCREASED width
-  // Used by generator to size both association logos consistently
-  logoWidth:      46,
-  // Less space between capsule and logos
-  logoGapFromLabel: 4,
-};
+// REMOVED ASSOCIATION SECTION
+// const ASSOCIATION = { ... };  // Completely removed
 
-// RIBBON - Reduced whitespace below
+// RIBBON - Adjusted position
 const RIBBON = {
-  y: 500,           // MOVED UP (was 510) - reduces whitespace
+  y: 475,  // Adjusted to match new BODY.endY
   height: 60,
   textSize: 28,
   borderRadius: 20,
@@ -179,7 +148,6 @@ module.exports = {
   RAILTRANS_LOGO,
   MANDAPAM,
   MANDAPAM_TEXT,
-  // EDITION_PILL removed - not exporting anymore
   DATE_PILLS,
   TAGLINE,
   BODY,
@@ -187,7 +155,6 @@ module.exports = {
   QR,
   TEXT_AREA,
   ORGANISED_BY,
-  ASSOCIATION,
   RIBBON,
   ASSETS_BG,
   ASSETS_LOGO,
