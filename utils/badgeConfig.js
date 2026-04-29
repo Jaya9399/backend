@@ -44,10 +44,10 @@ const MANDAPAM_TEXT = {
   line1: "BHARAT MANDAPAM",
   line2: "NEW DELHI, INDIA",
   // Explicit Y so it never overwrites the logo
-  y: 50,
+  y: 60,
   fontSizeLine1: 8.2,
   fontSizeLine2: 8.2,
-  lineGap: 0.5,     // gap between line1 and line2
+  lineGap: 2,     // gap between line1 and line2
   color: "#555555",
 };
 
@@ -146,9 +146,9 @@ const ORGANISED_BY = {
 
 // RIBBON - Reduced whitespace below
 const RIBBON = {
-  y: 500,           // MOVED UP (was 510) - reduces whitespace
+  y: 510,           // MOVED UP (was 510) - reduces whitespace
   height: 60,
-  textSize: 28,
+  textSize: 32,
   borderRadius: 20,
   textColor: "#FFFFFF",
 };
