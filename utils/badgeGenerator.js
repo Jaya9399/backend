@@ -120,16 +120,30 @@ function drawHeader(doc) {
     .text("2026", dp?.monthX ?? 0, (dp?.monthY ?? 0) + 20,
       { width: monthMaxWidth, lineBreak: false });
 
-  // Venue — centered under Mandapam logo
-  const venueX = Number(C?.MANDAPAM?.x) || (dp?.monthX ?? 0);
-  const venueW = Number(C?.MANDAPAM?.width) || Math.max(40, rightLimit - (dp?.monthX ?? 0));
-  const venueMaxWidth = venueW;
-  doc.fillColor("#555555").font("Helvetica").fontSize(6.5)
-    .text("BHARAT MANDAPAM, NEW DELHI, INDIA", venueX, dp?.venueY ?? 0,
-      { width: venueMaxWidth, align: "center", lineBreak: false });
-
   // Bharat Mandapam logo — top-right
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
+
+  // Venue — bigger + less gap under Mandapam logo (2 lines)
+  const mt = C.MANDAPAM_TEXT || {};
+  const venueX = Number(C?.MANDAPAM?.x) || (dp?.monthX ?? 0);
+  const venueW = Number(C?.MANDAPAM?.width) || Math.max(40, rightLimit - (dp?.monthX ?? 0));
+
+  const logoBottomY = Number(C?.MANDAPAM?.y ?? 0) + Number(C?.MANDAPAM?.width ?? 0) * 0.40;
+  const baseY =
+    Number.isFinite(logoBottomY) && logoBottomY > 0
+      ? logoBottomY + (Number(mt.gapFromLogo) || 4)
+      : (dp?.venueY ?? 0);
+
+  doc.fillColor(mt.color || "#555555").font("Helvetica-Bold").fontSize(mt.fontSizeLine1 || 8.5)
+    .text(mt.line1 || "BHARAT MANDAPAM", venueX, baseY, { width: venueW, align: "center", lineBreak: false });
+
+  const line1H = doc.currentLineHeight();
+  doc.fillColor(mt.color || "#555555").font("Helvetica").fontSize(mt.fontSizeLine2 || 6.7)
+    .text(mt.line2 || "NEW DELHI, INDIA", venueX, baseY + line1H + (Number(mt.lineGap) || 1.5), {
+      width: venueW,
+      align: "center",
+      lineBreak: false,
+    });
 }
 
 function drawTagline(doc) {
@@ -190,7 +204,7 @@ async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   doc.image(qrBuf, qrX, qrY, { width: C.QR.size });
 
   // Calculate text starting position
-  const textStartY = qrY + C.QR.size + 15;
+  const textStartY = qrY + C.QR.size + (Number(C?.TEXT_AREA?.gapAfterQr) || 15);
   
   // Draw NAME - BOLDER AND BIGGER
   doc.fillColor("#000")
@@ -275,8 +289,8 @@ function drawFooter(doc) {
     24
   );
 
-  // Logos just below capsule
-  const logoY = pillY + 34;
+  // Logos just below capsule (slightly closer + bigger)
+  const logoY = pillY + (Number(assoc.logoGapFromLabel) || 10) + 24;
 
   safeImage(doc, assoc.logo1Path, logosX, logoY, logoWidth);
   safeImage(doc, assoc.logo2Path, logosX + logoWidth + gap, logoY, logoWidth);
