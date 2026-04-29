@@ -111,7 +111,7 @@ function drawHeader(doc) {
   // "JULY" then "2026" — to right of date squares (no overlap with Mandapam)
   const mandapamLeftEdge = Number(C?.MANDAPAM?.x);
   const rightLimit = Number.isFinite(mandapamLeftEdge) ? mandapamLeftEdge - 10 : C.PAGE.width - 8;
-  const monthMaxWidth = Math.max(40, rightLimit - (dp?.monthX ?? 0));
+  const monthMaxWidth = 120; 
   doc.fillColor("#000000")
   .font("Helvetica-Bold")
   .fontSize(20)
@@ -258,7 +258,7 @@ function drawFooter(doc) {
   );
 
   // LOGO (perfect center + spacing)
-  const logoWidth = 150;
+  const logoWidth = 120;
   const logoX = centerX - (logoWidth / 2);
   const logoY = labelY + 30;
 
