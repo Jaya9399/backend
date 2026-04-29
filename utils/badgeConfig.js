@@ -43,10 +43,11 @@ const MANDAPAM = {
 const MANDAPAM_TEXT = {
   line1: "BHARAT MANDAPAM",
   line2: "NEW DELHI, INDIA",
-  fontSizeLine1: 8.5,
-  fontSizeLine2: 6.7,
-  gapFromLogo: 4,   // vertical gap between logo bottom and line1
-  lineGap: 1.5,     // gap between line1 and line2
+  // Explicit Y so it never overwrites the logo
+  y: 50,
+  fontSizeLine1: 8.2,
+  fontSizeLine2: 8.2,
+  lineGap: 0.5,     // gap between line1 and line2
   color: "#555555",
 };
 
@@ -157,8 +158,9 @@ const ASSOCIATION = {
   logo2Y:         414,
   logo2Width:     65,       // INCREASED width
   // Used by generator to size both association logos consistently
-  logoWidth:      44,
-  logoGapFromLabel: 10,
+  logoWidth:      46,
+  // Less space between capsule and logos
+  logoGapFromLabel: 4,
 };
 
 // RIBBON - Reduced whitespace below
