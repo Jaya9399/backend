@@ -8,6 +8,7 @@ const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
+// Match page height to artwork to avoid bottom white gap.
 const PAGE = { width: 400, height: 560 };
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
@@ -28,26 +29,31 @@ const RAILTRANS_LOGO = {
   width: 148,
 };
 
-// Bharat Mandapam logo — RIGHT SIDE, LARGER, SAME LINE
+// Bharat Mandapam logo — top-right (INCREASED SIZE)
 const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
-  width: 90,  // INCREASED from 76 to 90
-  x:     PAGE.width - 90 - 10,  // Adjusted for new width
-  y:     16,  // Moved up to be in same line as RailTrans logo
+  // Drop it slightly to avoid sticking to the top edge
+  // Keep it in the far-right column so it never overlaps the date/month text
+  width: 95,
+  x:     PAGE.width - 95-8,
+  y:     18,
 };
 
-// Bharat Mandapam text - Positioned to the right of date pills
+// Bharat Mandapam text under the logo (tighter + bigger)
 const MANDAPAM_TEXT = {
   line1: "BHARAT MANDAPAM",
   line2: "NEW DELHI, INDIA",
-  y: 66,  // Adjusted position
+  // Explicit Y so it never overwrites the logo
+  y: 50,
   fontSizeLine1: 8.2,
   fontSizeLine2: 8.2,
-  lineGap: 0.5,
+  lineGap: 0.5,     // gap between line1 and line2
   color: "#555555",
 };
 
-// Date Pills (03 and 04)
+// REMOVED: EDITION_PILL - No longer showing "6th EDITION"
+
+// Date Pills (03 and 04 with WHITE text on RED background)
 const DATE_PILLS = {
   pill1: { 
     text: "03", 
@@ -69,8 +75,10 @@ const DATE_PILLS = {
     textColor: "#FFFFFF",
     fontSize: 18 
   },
+  // Add breathing room from the Mandapam logo and keep alignment clean
   monthX: 255,
   monthY: 40,
+  // Venue sits under the Mandapam logo with some gap
   venueY: 70,
 };
 
@@ -79,7 +87,7 @@ const TAGLINE = {
   y:               100,
   height:          24,
   bgColor:         "#000000",
-  text:            "Asia's Largest Event for Railways, Transportation & Semiconductor Industry",
+  text:            "ASIA'S LARGEST EVENT FOR RAILWAY'S, TRANSPORTATION & SEMICONDUCTOR INDUSTRY",
   pillBgColor:     "#C8102E",
   pillBorderColor: "#C8102E",
   textColor:       "#FFFFFF",
@@ -89,16 +97,16 @@ const TAGLINE = {
 // ─── Body ────────────────────────────────────────────────────────────────────
 const BODY = {
   startY:         124,
-  endY:           475,  // Reduced to minimize whitespace
+  endY:           500, 
   bgColor:        "#D8EEF8",
   bgImage:        path.join(ASSETS_BG, "bg.jpeg"),
   overlayOpacity: 185,
 };
 
-// ─── QR Card - Reduced height to remove whitespace ────────────────────────────
+// ─── QR Card ─────────────────────────────────────────────────────────────────
 const QR_CARD = {
   width:       250, 
-  height:      230,  // REDUCED from 260 to 230
+  height:      260, 
   get x()     { return (PAGE.width - this.width) / 2; },
   y:           138,
   radius:      10,
@@ -107,8 +115,8 @@ const QR_CARD = {
   borderWidth: 0.8,
 };
 
-// QR code - Slightly smaller to fit better
-const QR = { size: 150 };  // REDUCED from 168 to 150
+// QR is square; "wider" == slightly larger
+const QR = { size: 168 };
 
 // ─── Text Areas ──────────────────────────────────────────────────────────────
 const TEXT_AREA = {
@@ -116,25 +124,29 @@ const TEXT_AREA = {
   companyY:        380,
   nameFontSize:    16, 
   companyFontSize: 12,
-  gapAfterQr:      15,  // REDUCED from 22 to 15
+  // Extra spacing so name/company sit a bit lower
+  gapAfterQr:      22,
 };
 
-// ─── Footer - Centered Organised By section ──────────────────────────────────
+// ─── Footer Logos with INCREASED SIZES and REDUCED WHITESPACE ─────────────────
 const ORGANISED_BY = {
   label:          "ORGANISED BY",
+  labelX:         20,
+  labelY:         405,
   labelBgColor:   "#1B3A8A",
   labelTextColor: "#FFFFFF",
-  labelFontSize:  10,  // INCREASED for better visibility
+  labelFontSize:  9,        // INCREASED font size
   logoPath:       path.join(ASSETS_LOGO, "Urban_Infra_Group_Logo-HD.png"),
-  logoWidth:      160,  // INCREASED width for centered layout
+  logoX:          20,
+  logoY:          418,
+  logoWidth:      130,      // INCREASED width
 };
 
-// REMOVED ASSOCIATION SECTION
-// const ASSOCIATION = { ... };  // Completely removed
 
-// RIBBON - Adjusted position
+
+// RIBBON - Reduced whitespace below
 const RIBBON = {
-  y: 475,  // Adjusted to match new BODY.endY
+  y: 500,           // MOVED UP (was 510) - reduces whitespace
   height: 60,
   textSize: 28,
   borderRadius: 20,
