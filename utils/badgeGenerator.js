@@ -123,23 +123,20 @@ function drawHeader(doc) {
   // Bharat Mandapam logo — top-right
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
 
-  // Venue — bigger + less gap under Mandapam logo (2 lines)
+  // Venue — 2 lines under Mandapam logo (explicit Y; no overlap)
   const mt = C.MANDAPAM_TEXT || {};
   const venueX = Number(C?.MANDAPAM?.x) || (dp?.monthX ?? 0);
   const venueW = Number(C?.MANDAPAM?.width) || Math.max(40, rightLimit - (dp?.monthX ?? 0));
 
-  const logoBottomY = Number(C?.MANDAPAM?.y ?? 0) + Number(C?.MANDAPAM?.width ?? 0) * 0.40;
-  const baseY =
-    Number.isFinite(logoBottomY) && logoBottomY > 0
-      ? logoBottomY + (Number(mt.gapFromLogo) || 4)
-      : (dp?.venueY ?? 0);
+  const baseY = Number(mt.y) || (dp?.venueY ?? 0);
 
-  doc.fillColor(mt.color || "#555555").font("Helvetica-Bold").fontSize(mt.fontSizeLine1 || 8.5)
+  doc.fillColor(mt.color || "#555555").font("Helvetica-Bold").fontSize(mt.fontSizeLine1 || 8.2)
     .text(mt.line1 || "BHARAT MANDAPAM", venueX, baseY, { width: venueW, align: "center", lineBreak: false });
 
-  const line1H = doc.currentLineHeight();
-  doc.fillColor(mt.color || "#555555").font("Helvetica").fontSize(mt.fontSizeLine2 || 6.7)
-    .text(mt.line2 || "NEW DELHI, INDIA", venueX, baseY + line1H + (Number(mt.lineGap) || 1.5), {
+  const line1H = doc.heightOfString(mt.line1 || "BHARAT MANDAPAM", { width: venueW, align: "center" });
+  // "NEW DELHI, INDIA" should be below and in same font style
+  doc.fillColor(mt.color || "#555555").font("Helvetica-Bold").fontSize(mt.fontSizeLine2 || 8.2)
+    .text(mt.line2 || "NEW DELHI, INDIA", venueX, baseY + line1H + (Number(mt.lineGap) || 0.5), {
       width: venueW,
       align: "center",
       lineBreak: false,
@@ -255,7 +252,6 @@ function drawFooter(doc) {
 
   // Text width
   doc.font("Helvetica-Bold").fontSize(assoc.labelFontSize);
-  const textWidth = doc.widthOfString(assoc.label);
 
   // Force bigger capsule width
   const pillWidth = doc.widthOfString(assoc.label) + (24 * 2);
@@ -290,7 +286,7 @@ function drawFooter(doc) {
   );
 
   // Logos just below capsule (slightly closer + bigger)
-  const logoY = pillY + (Number(assoc.logoGapFromLabel) || 10) + 24;
+  const logoY = pillY + 24 + (Number(assoc.logoGapFromLabel) || 4);
 
   safeImage(doc, assoc.logo1Path, logosX, logoY, logoWidth);
   safeImage(doc, assoc.logo2Path, logosX + logoWidth + gap, logoY, logoWidth);
