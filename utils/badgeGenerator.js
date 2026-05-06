@@ -162,7 +162,7 @@ function drawHeader(doc) {
   doc
     .fillColor("#000000")
     .font("Helvetica-Bold")
-    .fontSize(20)
+    .fontSize(18)
     .text("JULY", dp?.monthX ?? 0, dp?.monthY ?? 0, {
       width: monthMaxWidth,
       lineBreak: false,
@@ -171,7 +171,7 @@ function drawHeader(doc) {
     .fillColor("#000000")
     .font("Helvetica-Bold")
     .fontSize(10)
-    .text("2026", dp.monthX + 5, dp.monthY + 22);
+   .text("2026", dp.monthX + 8, dp.monthY + 28);
   // Bharat Mandapam logo — top-right
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
 
