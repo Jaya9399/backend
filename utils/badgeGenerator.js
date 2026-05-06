@@ -114,7 +114,6 @@ function drawHeader(doc) {
   const H = C.HEADER;
   const dp = C.DATE_PILLS;
 
-
   doc.rect(0, H.y, C.PAGE.width, H.height).fill(H.bgColor);
 
   // RailTrans logo — left
@@ -125,7 +124,6 @@ function drawHeader(doc) {
     C.RAILTRANS_LOGO.y,
     C.RAILTRANS_LOGO.width,
   );
-
 
   // Date squares "03" "04"
   if (dp?.pill1?.text) {
@@ -169,7 +167,11 @@ function drawHeader(doc) {
       width: monthMaxWidth,
       lineBreak: false,
     });
-
+  doc
+    .fillColor("#000000")
+    .font("Helvetica-Bold")
+    .fontSize(10)
+    .text("2026", dp.monthX + 5, dp.monthY + 22);
   // Bharat Mandapam logo — top-right
   safeImage(doc, C.MANDAPAM.path, C.MANDAPAM.x, C.MANDAPAM.y, C.MANDAPAM.width);
 
@@ -253,8 +255,6 @@ function drawBodyBackground(doc) {
 
 async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   const qc = C.QR_CARD;
-
-
 
   // Generate QR code with larger size
   const qrPayload =
