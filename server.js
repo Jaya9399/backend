@@ -20,9 +20,8 @@ app.use('/uploads', express.static(uploadsDir, {
   }
 }));
 
-// --- Basic middleware ---
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+
 
 // --- CORS (configurable) ---
 const defaultOrigins = [
@@ -264,7 +263,12 @@ if (couponsRouter) {
 // Other API routes (mount if available)
 if (otpRouter) app.use('/api/otp', otpRouter);
 if (paymentRouter) app.use('/api/payment', paymentRouter);
+app.use(express.json({ limit: '20mb' }));
 
+app.use(express.urlencoded({
+  extended: true,
+  limit: '10mb'
+}));
 // Mount email router at both /api/email and /api/mailer to match frontend calls
 if (emailRouter) {
   app.use('/api/email', emailRouter);

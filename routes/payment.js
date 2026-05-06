@@ -9,6 +9,12 @@ router.post("/create-order", express.json({ limit: "1mb" }), paymentsController.
 router.get("/status", paymentsController.status);
 
 // Webhook endpoint: use raw body middleware to verify signature
-router.post("/webhook", express.raw({ type: "application/json", limit: "1mb" }), paymentsController.webhookHandler);
-
+router.post(
+  "/webhook",
+  express.raw({
+    type: "*/*",
+    limit: "1mb",
+  }),
+  paymentsController.webhookHandler
+);
 module.exports = router;
