@@ -9,7 +9,8 @@ const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
 // ─── Page Size ────────────────────────────────────────────────────────────────
 // Match page height to artwork to avoid bottom white gap.
-const PAGE = { width: 400, height: 560 };
+RIBBON.y = 510
+RIBBON.height = 60
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
