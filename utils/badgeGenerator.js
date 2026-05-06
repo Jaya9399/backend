@@ -113,7 +113,7 @@ function drawSquarePill(
 function drawHeader(doc) {
   const H = C.HEADER;
   const dp = C.DATE_PILLS;
-  const ep = C.EDITION_PILL;
+
 
   doc.rect(0, H.y, C.PAGE.width, H.height).fill(H.bgColor);
 
@@ -126,20 +126,6 @@ function drawHeader(doc) {
     C.RAILTRANS_LOGO.width,
   );
 
-  // Optional "EDITION" pill (may be removed in config)
-  if (ep && typeof ep.text === "string" && ep.text.trim() !== "") {
-    drawPill(
-      doc,
-      ep.text,
-      ep.x,
-      ep.y,
-      ep.bgColor,
-      ep.textColor,
-      ep.fontSize,
-      16,
-      18,
-    );
-  }
 
   // Date squares "03" "04"
   if (dp?.pill1?.text) {
