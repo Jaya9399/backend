@@ -2,7 +2,7 @@
 "use strict";
 
 const path = require("path");
-const PAGE = { width: 400, height: 580 };
+const PAGE = { width: 400, height: 570 };
 // Asset paths
 const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
@@ -32,8 +32,8 @@ const MANDAPAM = {
   path:  path.join(ASSETS_LOGO, "bharat_mandapam.png"),
   // Drop it slightly to avoid sticking to the top edge
   // Keep it in the far-right column so it never overlaps the date/month text
-  width: 95,
-  x:     PAGE.width - 95-8,
+  width: 85,
+  x:     PAGE.width - 85-12,
   y:     18,
 };
 
@@ -74,7 +74,7 @@ const DATE_PILLS = {
     fontSize: 18 
   },
   // Add breathing room from the Mandapam logo and keep alignment clean
-  monthX: 255,
+  monthX: 245,
   monthY: 40,
   // Venue sits under the Mandapam logo with some gap
   venueY: 70,
