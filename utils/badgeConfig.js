@@ -2,15 +2,12 @@
 "use strict";
 
 const path = require("path");
-
+const PAGE = { width: 400, height: 580 };
 // Asset paths
 const ASSETS_BG   = path.join(__dirname, "..", "assets", "bg");
 const ASSETS_LOGO = path.join(__dirname, "..", "assets", "logos");
 
-// ─── Page Size ────────────────────────────────────────────────────────────────
-// Match page height to artwork to avoid bottom white gap.
-RIBBON.y = 510
-RIBBON.height = 60
+
 
 // ─── Top Strip ───────────────────────────────────────────────────────────────
 const TOP_STRIP = { y: 0, height: 12 };
