@@ -254,12 +254,7 @@ function drawBodyBackground(doc) {
 async function drawQRCard(doc, ticketCode, entity, mode, name, company) {
   const qc = C.QR_CARD;
 
-roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
-doc.fill(qc.bgColor);
 
-doc.strokeColor(qc.borderColor).lineWidth(qc.borderWidth);
-roundedRect(doc, qc.x, qc.y, qc.width, qc.height, qc.radius);
-doc.stroke();
 
   // Generate QR code with larger size
   const qrPayload =
@@ -354,20 +349,17 @@ function drawRibbon(doc, themeColor, ribbonLabel) {
 
   doc.rect(0, R.y, C.PAGE.width, R.height).fill(themeColor);
 
-  // then add rounded mask on top (optional smooth look)
   roundedRect(doc, 0, R.y, C.PAGE.width, R.height, R.borderRadius);
   doc.fill(themeColor);
 
-  // Vertically center text within ribbon
   const textY = R.y + (R.height - R.textSize) / 2;
 
-  // Main label
   doc
     .fillColor(R.textColor)
     .opacity(1)
-    .font("Helvetica-Bold") // Fixed: Use standard PDF font
+    .font("Helvetica-Bold")
     .fontSize(R.textSize)
-    .text(data.name?.toUpperCase() || ribbonLabel, 0, textY, {
+    .text(ribbonLabel, 0, textY, {
       align: "center",
       width: C.PAGE.width,
     });
