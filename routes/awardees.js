@@ -204,7 +204,7 @@ router.post('/', express.json(), async (req, res) => {
       data: form,
       createdAt: new Date(),       // ✅
       updatedAt: new Date(),       // ✅
-      added_by_admin: addedByAdmin,
+      
     };
 
     // ✅ ADD ALL DYNAMIC FIELDS from form
