@@ -456,7 +456,10 @@ if (couponsRouter) {
 
 // Other API routes (mount if available)
 if (otpRouter) app.use("/api/otp", otpRouter);
-if (paymentRouter) app.use("/api/payment", paymentRouter);
+if (paymentRouter) {
+  app.use("/api/payment", paymentRouter);
+  app.use("/api/razorpay", paymentRouter);
+}
 // Default small limit for most routes
 app.use(express.json({ limit: "1mb" }));
 
