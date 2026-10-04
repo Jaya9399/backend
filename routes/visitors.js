@@ -252,7 +252,7 @@ router.post("/", async (req, res) => {
         const result = await sendTicketEmail({
           entity: "visitors",
           record: savedDoc,
-          options: { forceSend: true, includeBadge: true },
+          options: { forceSend: true, includeBadge: true, includeAttendingCard: true },
         });
 
         if (result?.success) {
@@ -390,7 +390,7 @@ router.post("/:id/send-ticket", async (req, res) => {
     const result = await sendTicketEmail({
       entity: "visitors",
       record: doc,
-      options: { forceSend: true, includeBadge: true },
+      options: { forceSend: true, includeBadge: true, includeAttendingCard: true },
     });
     if (result?.success) {
       await col.updateOne(

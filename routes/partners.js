@@ -280,7 +280,7 @@ router.post("/", async (req, res) => {
               const result = await sendTicketEmail({
                 entity: "partners",
                 record: saved,
-                options: { forceSend: true, includeBadge: true },
+                options: { forceSend: true, includeBadge: true, includeAttendingCard: true },
               });
               
               if (result?.success) {
@@ -676,7 +676,7 @@ router.post("/:id/resend-email", async (req, res) => {
       const result = await sendTicketEmail({
         entity: "partners",
         record: doc,
-        options: { forceSend: true, includeBadge: true },
+        options: { forceSend: true, includeBadge: true, includeAttendingCard: true },
       });
 
       if (result && result.success) {

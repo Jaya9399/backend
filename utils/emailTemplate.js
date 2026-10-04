@@ -3,7 +3,7 @@
  *
  * buildTicketEmail(... ) - email template builder for ticket delivery
  *
- * ✅ NO PDF ATTACHMENT - badge only via download button
+ * ✅ Attending card PDF is attached in sendTicketEmail(); the email body still keeps a download button
  * ✅ Event details passed from caller (no fetch needed)
  * ✅ Professional responsive design
  * ✅ FIXED:  Download URLs use query params (? entity=visitors&id=xxx)

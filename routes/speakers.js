@@ -438,7 +438,7 @@ router.post("/:id/send-ticket", async (req, res) => {
       const result = await sendTicketEmail({
         entity: "speakers",
         record: doc,
-        options: { forceSend: true, includeBadge: true },
+        options: { forceSend: true, includeBadge: true, includeAttendingCard: true },
       });
 
       if (result && result.success) {
